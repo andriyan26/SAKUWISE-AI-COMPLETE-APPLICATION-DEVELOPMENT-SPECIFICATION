@@ -335,53 +335,114 @@ if ($path === 'dashboard/summary' && $method === 'GET') {
 }
 
 // TRANSACTIONS
-if ($path === 'transactions') {
+if (preg_match('#^transactions(/([^/]+))?$#', $path, $txMatch)) {
     $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Tidak terautentikasi."]);
+        exit;
+    }
 
-    if ($method === 'GET') {
-        $stmt = $pdo->prepare("
-            SELECT t.*, c.name as category_name, c.icon as category_icon, c.color as category_color 
+    $txId = $txMatch[2] ?? null; // specific transaction ID if present
+
+    if ($method === 'GET' && !$txId) {
+        // Parse query params
+        $searchQ     = $_GET['search']        ?? '';
+        $typeFilter  = $_GET['type']          ?? 'ALL';
+        $catFilter   = $_GET['categoryId']    ?? 'ALL';
+        $pmFilter    = $_GET['paymentMethod'] ?? 'ALL';
+        $pageNum     = max(1, (int)($_GET['page']  ?? 1));
+        $limitNum    = max(1, min(100, (int)($_GET['limit'] ?? 10)));
+        $sortByCol   = in_array($_GET['sortBy'] ?? '', ['transactionDate','amount','title']) ? ($_GET['sortBy']) : 'transaction_date';
+        $sortByCol   = $sortByCol === 'transactionDate' ? 'transaction_date' : $sortByCol;
+        $sortOrd     = strtoupper($_GET['sortOrder'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
+        $offset      = ($pageNum - 1) * $limitNum;
+
+        // Build WHERE clause
+        $where  = ['t.user_id = ?'];
+        $params = [$userId];
+        if ($searchQ) { $where[] = '(t.title LIKE ? OR t.merchant LIKE ?)'; $params[] = "%$searchQ%"; $params[] = "%$searchQ%"; }
+        if ($typeFilter !== 'ALL') { $where[] = 't.type = ?'; $params[] = $typeFilter; }
+        if ($catFilter  !== 'ALL') { $where[] = 't.category_id = ?'; $params[] = $catFilter; }
+        if ($pmFilter   !== 'ALL') { $where[] = 't.payment_method = ?'; $params[] = $pmFilter; }
+        $whereStr = implode(' AND ', $where);
+
+        // Count total rows for pagination
+        $countStmt = $pdo->prepare("SELECT COUNT(*) as cnt FROM transactions t WHERE $whereStr");
+        $countStmt->execute($params);
+        $totalRows = (int)$countStmt->fetch()['cnt'];
+        $totalPages = max(1, (int)ceil($totalRows / $limitNum));
+
+        // Summary income/expense
+        $sumStmt = $pdo->prepare("SELECT
+            COALESCE(SUM(CASE WHEN t.type='INCOME' THEN t.amount ELSE 0 END), 0) as totalIncome,
+            COALESCE(SUM(CASE WHEN t.type='EXPENSE' THEN t.amount ELSE 0 END), 0) as totalExpense
+            FROM transactions t WHERE $whereStr");
+        $sumStmt->execute($params);
+        $sumRow = $sumStmt->fetch();
+        $totalIncome  = (float)$sumRow['totalIncome'];
+        $totalExpense = (float)$sumRow['totalExpense'];
+
+        // Fetch paginated rows
+        $dataParams   = array_merge($params, [$limitNum, $offset]);
+        $dataStmt = $pdo->prepare("
+            SELECT t.*, c.name as category_name, c.icon as category_icon, c.color as category_color
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = ?
-            ORDER BY t.transaction_date DESC
-            LIMIT 50
+            WHERE $whereStr
+            ORDER BY t.$sortByCol $sortOrd
+            LIMIT ? OFFSET ?
         ");
-        $stmt->execute([$userId]);
-        $rows = $stmt->fetchAll();
+        $dataStmt->execute($dataParams);
+        $rows = $dataStmt->fetchAll();
 
         $formatted = array_map(function($r) {
             return [
-                "id" => $r['id'],
-                "type" => $r['type'],
-                "title" => $r['title'],
-                "amount" => (float)$r['amount'],
-                "description" => $r['description'],
-                "merchant" => $r['merchant'],
-                "paymentMethod" => $r['payment_method'],
+                "id"              => $r['id'],
+                "type"            => $r['type'],
+                "title"           => $r['title'],
+                "amount"          => (float)$r['amount'],
+                "description"     => $r['description'],
+                "merchant"        => $r['merchant'],
+                "paymentMethod"   => $r['payment_method'],
                 "transactionDate" => $r['transaction_date'],
+                "categoryId"      => $r['category_id'],
                 "category" => [
-                    "id" => $r['category_id'],
-                    "name" => $r['category_name'] ?: 'Lainnya',
-                    "icon" => $r['category_icon'] ?: 'Tag',
+                    "id"    => $r['category_id'],
+                    "name"  => $r['category_name']  ?: 'Lainnya',
+                    "icon"  => $r['category_icon']  ?: 'Tag',
                     "color" => $r['category_color'] ?: '#64748B'
                 ]
             ];
         }, $rows);
 
-        echo json_encode(["success" => true, "data" => $formatted]);
+        echo json_encode([
+            "success" => true,
+            "data"    => $formatted,
+            "pagination" => [
+                "page"       => $pageNum,
+                "limit"      => $limitNum,
+                "total"      => $totalRows,
+                "totalPages" => $totalPages
+            ],
+            "summary" => [
+                "totalIncome"  => $totalIncome,
+                "totalExpense" => $totalExpense,
+                "netCashFlow"  => $totalIncome - $totalExpense
+            ]
+        ]);
         exit;
     }
 
-    if ($method === 'POST') {
-        $type = $body['type'] ?? 'EXPENSE';
-        $title = trim($body['title'] ?? '');
-        $amount = (float)($body['amount'] ?? 0);
-        $categoryId = $body['categoryId'] ?? null;
-        $merchant = $body['merchant'] ?? null;
-        $paymentMethod = $body['paymentMethod'] ?? 'Tunai';
+    if ($method === 'POST' && !$txId) {
+        $type            = $body['type']           ?? 'EXPENSE';
+        $title           = trim($body['title']     ?? '');
+        $amount          = (float)($body['amount'] ?? 0);
+        $categoryId      = $body['categoryId']     ?? null;
+        $merchant        = $body['merchant']       ?? null;
+        $paymentMethod   = $body['paymentMethod']  ?? 'Tunai';
         $transactionDate = $body['transactionDate'] ?? date('Y-m-d H:i:s');
-        $description = $body['description'] ?? null;
+        $description     = $body['description']    ?? null;
 
         if (empty($title) || $amount <= 0) {
             http_response_code(400);
@@ -389,18 +450,45 @@ if ($path === 'transactions') {
             exit;
         }
 
-        $txId = generate_uuid();
-        $stmt = $pdo->prepare("
+        $newId = generate_uuid();
+        $stmt  = $pdo->prepare("
             INSERT INTO transactions (id, user_id, category_id, type, title, amount, description, merchant, payment_method, transaction_date, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
         ");
-        $stmt->execute([$txId, $userId, $categoryId, $type, $title, $amount, $description, $merchant, $paymentMethod, $transactionDate]);
+        $stmt->execute([$newId, $userId, $categoryId, $type, $title, $amount, $description, $merchant, $paymentMethod, $transactionDate]);
 
         echo json_encode([
             "success" => true,
             "message" => "Transaksi berhasil dicatat!",
-            "data" => ["id" => $txId, "title" => $title, "amount" => $amount]
+            "data"    => ["id" => $newId, "title" => $title, "amount" => $amount]
         ]);
+        exit;
+    }
+
+    if (($method === 'PUT' || $method === 'PATCH') && $txId) {
+        $title           = trim($body['title']      ?? '');
+        $amount          = (float)($body['amount']  ?? 0);
+        $type            = $body['type']             ?? 'EXPENSE';
+        $categoryId      = $body['categoryId']       ?? null;
+        $merchant        = $body['merchant']         ?? null;
+        $paymentMethod   = $body['paymentMethod']    ?? 'Tunai';
+        $transactionDate = $body['transactionDate']  ?? date('Y-m-d H:i:s');
+        $description     = $body['description']      ?? null;
+
+        $stmt = $pdo->prepare("
+            UPDATE transactions SET title=?, amount=?, type=?, category_id=?, merchant=?,
+            payment_method=?, transaction_date=?, description=?, updated_at=NOW()
+            WHERE id=? AND user_id=?
+        ");
+        $stmt->execute([$title, $amount, $type, $categoryId, $merchant, $paymentMethod, $transactionDate, $description, $txId, $userId]);
+        echo json_encode(["success" => true, "message" => "Transaksi berhasil diperbarui!"]);
+        exit;
+    }
+
+    if ($method === 'DELETE' && $txId) {
+        $stmt = $pdo->prepare("DELETE FROM transactions WHERE id = ? AND user_id = ?");
+        $stmt->execute([$txId, $userId]);
+        echo json_encode(["success" => true, "message" => "Transaksi berhasil dihapus."]);
         exit;
     }
 }
@@ -451,6 +539,62 @@ if ($path === 'notifications' && $method === 'GET') {
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll();
     echo json_encode(["success" => true, "data" => $rows]);
+    exit;
+}
+
+// SETTINGS: AVATAR UPLOAD (simpan sebagai URL DiceBear atau data URL)
+if ($path === 'settings/avatar' && $method === 'POST') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Tidak terautentikasi."]);
+        exit;
+    }
+
+    // Coba baca file upload
+    if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+        $file     = $_FILES['avatar'];
+        $maxSize  = 5 * 1024 * 1024; // 5MB
+        $allowed  = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+        if ($file['size'] > $maxSize) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Ukuran foto maksimal 5MB."]);
+            exit;
+        }
+
+        $mime = mime_content_type($file['tmp_name']);
+        if (!in_array($mime, $allowed)) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Format foto harus JPG, PNG, atau WEBP."]);
+            exit;
+        }
+
+        // Encode as base64 data URL dan simpan di database
+        $imageData  = file_get_contents($file['tmp_name']);
+        $base64     = base64_encode($imageData);
+        $avatarUrl  = "data:{$mime};base64,{$base64}";
+
+        $stmt = $pdo->prepare("UPDATE users SET avatar_url = ?, updated_at = NOW() WHERE id = ?");
+        $stmt->execute([$avatarUrl, $userId]);
+
+        echo json_encode([
+            "success"   => true,
+            "message"   => "Foto profil berhasil diunggah!",
+            "avatarUrl" => $avatarUrl
+        ]);
+    } else {
+        // Fallback: baca dari JSON body (avatarUrl string)
+        $avatarUrl = $body['avatarUrl'] ?? null;
+        if ($avatarUrl) {
+            $stmt = $pdo->prepare("UPDATE users SET avatar_url = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->execute([$avatarUrl, $userId]);
+            echo json_encode(["success" => true, "message" => "Avatar berhasil diperbarui!", "avatarUrl" => $avatarUrl]);
+        } else {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Tidak ada file foto yang dikirim."]);
+        }
+    }
     exit;
 }
 
@@ -506,8 +650,8 @@ if ($path === 'auth/onboarding' && $method === 'POST') {
     exit;
 }
 
-// AUTH: UPDATE PROFILE / SETTINGS
-if ($path === 'auth/settings' && in_array($method, ['PUT', 'PATCH'])) {
+// AUTH: UPDATE PROFILE / SETTINGS (mendukung /settings dan /auth/settings)
+if (($path === 'settings' || $path === 'auth/settings') && in_array($method, ['PUT', 'PATCH'])) {
     $userId = get_current_user_id($pdo);
     if (!$userId) {
         http_response_code(401);

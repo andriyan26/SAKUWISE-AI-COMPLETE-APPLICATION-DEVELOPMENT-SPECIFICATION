@@ -66,9 +66,10 @@ export const TransactionsPage: React.FC = () => {
 
       const res = await api.get(`/transactions?${params.toString()}`);
       if (res.success) {
-        setTransactions(res.data);
-        setPagination(res.pagination);
-        setSummary(res.summary);
+        setTransactions(res.data ?? []);
+        // ✅ Null-safe: PHP bridge lama tidak mengirim pagination/summary → pakai default
+        setPagination(res.pagination ?? { page: 1, totalPages: 1, total: res.data?.length ?? 0 });
+        setSummary(res.summary ?? { totalIncome: 0, totalExpense: 0, netCashFlow: 0 });
       }
     } catch (error) {
       console.error('fetchTransactions error:', error);
@@ -76,6 +77,7 @@ export const TransactionsPage: React.FC = () => {
       setIsLoading(false);
     }
   };
+
 
   const fetchCategories = async () => {
     try {

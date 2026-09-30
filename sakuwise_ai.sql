@@ -4,9 +4,8 @@
 -- Akun Demo: andrian@sakuwise.ai | Kata Sandi: password123
 -- Tanggal Ekspor: 30 September 2026
 -- ========================================================
-
-CREATE DATABASE IF NOT EXISTS sakuwise_ai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE sakuwise_ai;
+-- Universal Hostinger & Local Database Import
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- MySQL dump 10.13  Distrib 8.0.30, for Win64 (x86_64)
 --
@@ -26,12 +25,9 @@ USE sakuwise_ai;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Current Database: `sakuwise_ai`
 --
 
-CREATE DATABASE /*!32312 IF NOT EXISTS*/ `sakuwise_ai` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci */ /*!80016 DEFAULT ENCRYPTION='N' */;
 
-USE `sakuwise_ai`;
 
 --
 -- Table structure for table `ai_conversations`
@@ -493,3 +489,5 @@ UNLOCK TABLES;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
 -- Dump completed on 2026-09-30 15:29:41
+
+SET FOREIGN_KEY_CHECKS = 1;

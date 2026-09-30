@@ -1,6 +1,12 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # 1. Route API requests directly to the native PHP API handler
+  RewriteRule ^api/v1/(.*)$ api/v1/index.php [QSA,L]
+  RewriteRule ^api/(.*)$ api/v1/index.php [QSA,L]
+
+  # 2. Frontend React SPA routes
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d

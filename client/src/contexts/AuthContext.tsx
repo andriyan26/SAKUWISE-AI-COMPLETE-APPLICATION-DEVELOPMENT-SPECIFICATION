@@ -50,21 +50,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     const res = await api.post('/auth/login', { email, password });
-    if (res.success && res.data) {
+    if (res && res.success && res.data) {
       if (res.data.token) {
         localStorage.setItem('sakuwise_token', res.data.token);
       }
       setUser(res.data.user);
+    } else {
+      throw new Error(res?.message || 'Email atau kata sandi tidak cocok. Silakan coba lagi.');
     }
   };
 
   const register = async (name: string, email: string, password: string) => {
     const res = await api.post('/auth/register', { name, email, password });
-    if (res.success && res.data) {
+    if (res && res.success && res.data) {
       if (res.data.token) {
         localStorage.setItem('sakuwise_token', res.data.token);
       }
       setUser(res.data.user);
+    } else {
+      throw new Error(res?.message || 'Pendaftaran gagal. Periksa kembali form data Anda.');
     }
   };
 

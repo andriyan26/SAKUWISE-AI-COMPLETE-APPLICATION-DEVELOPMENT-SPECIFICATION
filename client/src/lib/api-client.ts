@@ -44,19 +44,60 @@ export async function apiRequest<T = any>(
 
   const url = `${BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include', // Includes HTTP-only cookies
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include', // Includes HTTP-only cookies
+    });
+  } catch (netErr: any) {
+    throw new ApiError(
+      'Tidak dapat terhubung ke server API backend. Pastikan server hosting dan database Anda aktif.',
+      0
+    );
+  }
 
-  const data = await response.json().catch(() => null);
+  // Parse JSON response safely
+  let data: any = null;
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    data = await response.json().catch(() => null);
+  } else {
+    // If response is text / HTML
+    const textData = await response.text().catch(() => '');
+    try {
+      data = JSON.parse(textData);
+    } catch (_) {
+      data = null;
+    }
+  }
 
   if (!response.ok) {
+    let errorMsg = 'Terjadi kesalahan pada permintaan server.';
+    if (data?.message) {
+      errorMsg = data.message;
+    } else if (response.status === 400) {
+      errorMsg = 'Data yang dikirim tidak valid. Periksa kembali form input Anda.';
+    } else if (response.status === 401) {
+      errorMsg = 'Email atau kata sandi tidak cocok. Silakan coba lagi.';
+    } else if (response.status === 404) {
+      errorMsg = 'Endpoint server API tidak ditemukan (404). Pastikan backend aktif di hosting Anda.';
+    } else if (response.status === 500) {
+      errorMsg = 'Terjadi kesalahan internal pada server database (500).';
+    } else if (response.status === 502 || response.status === 503) {
+      errorMsg = 'Server backend sedang tidak aktif atau tidak dapat dihubungi (502/503).';
+    } else {
+      errorMsg = `Permintaan gagal dengan status ${response.status}.`;
+    }
+
+    throw new ApiError(errorMsg, response.status, data?.errors);
+  }
+
+  if (data === null || typeof data !== 'object') {
     throw new ApiError(
-      data?.message || 'Terjadi kesalahan pada permintaan server.',
-      response.status,
-      data?.errors
+      'Server tidak mengembalikan respons JSON yang valid. Pastikan backend API sudah aktif.',
+      502
     );
   }
 

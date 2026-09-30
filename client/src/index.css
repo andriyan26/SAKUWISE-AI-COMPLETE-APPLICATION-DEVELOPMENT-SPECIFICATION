@@ -1,0 +1,249 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+html.dark {
+  --bg-app: #0B1020;
+  --bg-sidebar: #0F172A;
+  --bg-surface: #151D30;
+  --bg-elevated: #1B2640;
+  --border-app: #293449;
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+}
+
+html:not(.dark) {
+  --bg-app: #F6F8FC;
+  --bg-sidebar: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #F1F5F9;
+  --border-app: #E6EAF2;
+  --text-primary: #172033;
+  --text-secondary: #64748B;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(21, 29, 48, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+html:not(.dark) .glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(230, 234, 242, 0.9);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+}
+
+/* Card Glows */
+.glow-border {
+  position: relative;
+}
+
+.glow-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(135deg, #635BFF, #14B8A6);
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0.35;
+  transition: opacity 0.3s ease;
+}
+
+.glow-border:hover::before {
+  opacity: 0.75;
+}
+
+/* Mascot Walking Keyframes & Physics */
+@keyframes mascotWalk {
+  0% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-6px) rotate(-3deg); }
+  50% { transform: translateY(0px) rotate(0deg); }
+  75% { transform: translateY(-6px) rotate(3deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+@keyframes mascotBlink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+@keyframes mascotBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+@keyframes mascotPush {
+  0%, 100% { transform: skewX(-4deg) translateY(0); }
+  50% { transform: skewX(-8deg) translateY(2px); }
+}
+
+@keyframes mascotPull {
+  0% { transform: rotate(-8deg) translateX(0px); }
+  50% { transform: rotate(-14deg) translateX(-8px) translateY(3px); }
+  100% { transform: rotate(-8deg) translateX(0px); }
+}
+
+@keyframes energyPulse {
+  0% { stroke-dashoffset: 60; opacity: 0.7; }
+  50% { opacity: 1; filter: drop-shadow(0 0 12px #14B8A6); }
+  100% { stroke-dashoffset: 0; opacity: 0.7; }
+}
+
+@keyframes cardPullIn {
+  0% {
+    transform: translate(110vw, 40px) scale(0.88);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  75% {
+    transform: translate(-12px, -4px) scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes slowCardPullIn {
+  0% {
+    transform: translateX(100vw) scale(0.92);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+  }
+  88% {
+    transform: translateX(-12px) scale(1.01);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-card-pull {
+  animation: slowCardPullIn 2.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes tabletSlideIn {
+  0% {
+    transform: translateX(120%) scale(0.92);
+    opacity: 0;
+  }
+  70% {
+    transform: translateX(-15px) scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes neonBorderPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(99, 91, 255, 0.4), 0 0 40px rgba(20, 184, 166, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(99, 91, 255, 0.7), 0 0 60px rgba(20, 184, 166, 0.4);
+  }
+}
+
+.animate-tablet-dock {
+  animation: tabletSlideIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-neon-glow {
+  animation: neonBorderPulse 3s infinite ease-in-out;
+}
+
+/* Smooth Entrance & Stagger Animations (Data Muncul Perlahan) */
+@keyframes fadeInUpSmooth {
+  0% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInSmooth {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUpSmooth 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in {
+  animation: fadeInSmooth 0.45s ease-out both;
+}
+
+.stagger-1 { animation-delay: 60ms; }
+.stagger-2 { animation-delay: 120ms; }
+.stagger-3 { animation-delay: 180ms; }
+.stagger-4 { animation-delay: 240ms; }
+.stagger-5 { animation-delay: 300ms; }
+.stagger-6 { animation-delay: 360ms; }
+.stagger-7 { animation-delay: 420ms; }
+
+/* Print styles for reports */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}

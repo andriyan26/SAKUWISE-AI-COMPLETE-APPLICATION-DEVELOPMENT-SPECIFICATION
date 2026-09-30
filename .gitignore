@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Production Build
+dist/
+*/dist/
+build/
+*/build/
+
+# Environment Variables
+.env
+.env.local
+.env.production
+.env.development
+server/.env
+client/.env
+!*.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# Temporary uploads (keep structure, ignore uploaded files)
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Large Media
+*.mp4
+*.webm

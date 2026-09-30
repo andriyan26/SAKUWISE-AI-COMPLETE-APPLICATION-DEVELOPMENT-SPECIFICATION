@@ -1,0 +1,18 @@
+{
+  "name": "sakuwise-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SAKUWISE AI — Smart Finance, Brighter Future. Full-stack personal finance web application with AI.",
+  "scripts": {
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "prisma:seed": "npm --prefix server run prisma:seed",
+    "prisma:push": "npm --prefix server run prisma:push",
+    "prisma:generate": "npm --prefix server run prisma:generate",
+    "test:server": "npm --prefix server run test",
+    "test": "npm --prefix server run test",
+    "build:client": "npm --prefix client run build",
+    "build:server": "npm --prefix server run build",
+    "build": "npm run build:server && npm run build:client"
+  }
+}

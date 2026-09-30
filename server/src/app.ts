@@ -24,7 +24,19 @@ export const createApp = (): express.Application => {
 
   // Middleware
   app.use(cors({
-    origin: [ENV.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+      if (!origin) return callback(null, true);
+      // Allow localhost in any port
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+      // Allow live domains (including sakuwiseai.tplp004.com)
+      if (origin.includes('tplp004.com') || origin === ENV.FRONTEND_URL) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   }));
   app.use(cookieParser());

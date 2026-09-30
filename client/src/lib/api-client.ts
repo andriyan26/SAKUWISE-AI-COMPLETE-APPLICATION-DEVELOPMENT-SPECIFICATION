@@ -1,4 +1,19 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Determine API base URL dynamically
+const getBaseUrl = (): string => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+    // When deployed on live production domain (not localhost)
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `${origin}/api/v1`;
+    }
+  }
+  return 'http://localhost:5000/api/v1';
+};
+
+const BASE_URL = getBaseUrl();
 
 export class ApiError extends Error {
   statusCode: number;

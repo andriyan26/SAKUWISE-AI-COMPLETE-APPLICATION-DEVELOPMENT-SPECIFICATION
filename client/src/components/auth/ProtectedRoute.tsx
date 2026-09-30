@@ -24,8 +24,14 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Jika onboarding belum selesai dan bukan di halaman onboarding → arahkan ke onboarding
   if (user && !user.onboardingCompleted && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />;
+  }
+
+  // Jika onboarding sudah selesai tapi masih di halaman onboarding → arahkan ke dashboard
+  if (user && user.onboardingCompleted && location.pathname === '/onboarding') {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

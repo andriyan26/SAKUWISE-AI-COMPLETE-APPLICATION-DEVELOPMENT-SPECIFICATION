@@ -6,7 +6,7 @@ import { Sparkles, ArrowRight, ArrowLeft, CheckCircle2, Target, DollarSign, Wall
 import confetti from 'canvas-confetti';
 
 export const OnboardingPage: React.FC = () => {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, updateUser } = useAuth();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<number>(1);
@@ -27,24 +27,36 @@ export const OnboardingPage: React.FC = () => {
   const handleFinish = async () => {
     setIsSubmitting(true);
     try {
-      await api.post('/auth/onboarding', {
+      const res = await api.post('/auth/onboarding', {
         financialGoal: goal,
         monthlyIncome,
         savingsTarget,
         currency,
       });
 
+      // ✅ KRITIS: Update state lokal DULU sebelum navigate
+      // Agar ProtectedRoute tidak redirect kembali ke /onboarding
+      updateUser({ onboardingCompleted: true, currency });
+
       confetti({
-        particleCount: 100,
-        spread: 80,
+        particleCount: 150,
+        spread: 90,
         origin: { y: 0.5 },
+        colors: ['#8B5CF6', '#06B6D4', '#10B981', '#F59E0B'],
       });
 
-      await refreshUser();
-      navigate('/dashboard');
+      // Tunggu sebentar agar confetti terlihat, baru navigate
+      setTimeout(() => {
+        navigate('/dashboard', { replace: true });
+      }, 800);
+
     } catch (error) {
       console.error('Onboarding submit error:', error);
-      navigate('/dashboard');
+      // Tetap tandai selesai dan lanjut ke dashboard walaupun API error
+      updateUser({ onboardingCompleted: true, currency });
+      setTimeout(() => {
+        navigate('/dashboard', { replace: true });
+      }, 500);
     } finally {
       setIsSubmitting(false);
     }

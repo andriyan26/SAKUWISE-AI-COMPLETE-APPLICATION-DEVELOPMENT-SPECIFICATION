@@ -85,10 +85,7 @@ function get_current_user_id($pdo) {
             return $decoded['userId'];
         }
     }
-    // Fallback: pick first user if demo
-    $stmt = $pdo->query("SELECT id FROM users LIMIT 1");
-    $row = $stmt->fetch();
-    return $row ? $row['id'] : null;
+    return null;
 }
 
 // 4. Parse Route Path
@@ -445,6 +442,11 @@ if ($path === 'goals') {
 // NOTIFICATIONS
 if ($path === 'notifications' && $method === 'GET') {
     $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Tidak terautentikasi."]);
+        exit;
+    }
     $stmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 20");
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll();
@@ -452,9 +454,124 @@ if ($path === 'notifications' && $method === 'GET') {
     exit;
 }
 
+// AUTH: COMPLETE ONBOARDING ← INI ENDPOINT YANG HILANG (PENYEBAB LOOP!)
+if ($path === 'auth/onboarding' && $method === 'POST') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Sesi Anda telah berakhir. Silakan login kembali."]);
+        exit;
+    }
+
+    $financialGoal  = $body['financialGoal']  ?? null;
+    $monthlyIncome  = $body['monthlyIncome']   ?? null;
+    $savingsTarget  = $body['savingsTarget']   ?? null;
+    $currency       = $body['currency']        ?? 'IDR';
+
+    try {
+        // Update onboarding_completed = 1 & currency
+        $stmt = $pdo->prepare("UPDATE users SET onboarding_completed = 1, currency = ?, updated_at = NOW() WHERE id = ?");
+        $stmt->execute([$currency, $userId]);
+
+        // Save user preferences jika ada
+        if ($financialGoal) {
+            $prefValue = json_encode([
+                "goal"          => $financialGoal,
+                "monthlyIncome" => $monthlyIncome,
+                "savingsTarget" => $savingsTarget
+            ]);
+
+            // Cek apakah sudah ada preference untuk key ini
+            $checkStmt = $pdo->prepare("SELECT id FROM user_preferences WHERE user_id = ? AND preference_key = 'primary_financial_goal'");
+            $checkStmt->execute([$userId]);
+            $existing = $checkStmt->fetch();
+
+            if ($existing) {
+                $upStmt = $pdo->prepare("UPDATE user_preferences SET preference_value_json = ?, updated_at = NOW() WHERE user_id = ? AND preference_key = 'primary_financial_goal'");
+                $upStmt->execute([$prefValue, $userId]);
+            } else {
+                $insStmt = $pdo->prepare("INSERT INTO user_preferences (id, user_id, preference_key, preference_value_json, created_at, updated_at) VALUES (?, ?, 'primary_financial_goal', ?, NOW(), NOW())");
+                $insStmt->execute([generate_uuid(), $userId, $prefValue]);
+            }
+        }
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Onboarding berhasil diselesaikan! Selamat mengelola keuangan bersama SAKUWISE AI."
+        ]);
+    } catch (Exception $ex) {
+        http_response_code(500);
+        echo json_encode(["success" => false, "message" => "Gagal menyimpan data onboarding: " . $ex->getMessage()]);
+    }
+    exit;
+}
+
+// AUTH: UPDATE PROFILE / SETTINGS
+if ($path === 'auth/settings' && in_array($method, ['PUT', 'PATCH'])) {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Tidak terautentikasi."]);
+        exit;
+    }
+
+    $fields = [];
+    $params = [];
+
+    if (isset($body['name'])) {
+        $fields[] = "name = ?";
+        $params[] = trim($body['name']);
+    }
+    if (isset($body['currency'])) {
+        $fields[] = "currency = ?";
+        $params[] = $body['currency'];
+    }
+    if (isset($body['themePreference'])) {
+        $fields[] = "theme_preference = ?";
+        $params[] = $body['themePreference'];
+    }
+    if (isset($body['avatarUrl'])) {
+        $fields[] = "avatar_url = ?";
+        $params[] = $body['avatarUrl'];
+    }
+
+    if (empty($fields)) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Tidak ada data yang diperbarui."]);
+        exit;
+    }
+
+    $fields[] = "updated_at = NOW()";
+    $params[] = $userId;
+
+    $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE id = ?";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    // Return updated user
+    $stmt2 = $pdo->prepare("SELECT id, name, email, avatar_url, currency, theme_preference, onboarding_completed FROM users WHERE id = ?");
+    $stmt2->execute([$userId]);
+    $user = $stmt2->fetch();
+
+    echo json_encode([
+        "success" => true,
+        "message" => "Profil berhasil diperbarui.",
+        "data" => [
+            "id"                  => $user['id'],
+            "name"                => $user['name'],
+            "email"               => $user['email'],
+            "avatarUrl"           => $user['avatar_url'],
+            "currency"            => $user['currency'] ?? 'IDR',
+            "themePreference"     => $user['theme_preference'] ?? 'dark',
+            "onboardingCompleted" => (bool)($user['onboarding_completed'] ?? false)
+        ]
+    ]);
+    exit;
+}
+
 // Fallback: 404 for unknown endpoints
 http_response_code(404);
 echo json_encode([
     "success" => false,
-    "message" => "Endpoint API '{$path}' tidak ditemukan."
+    "message" => "Endpoint API '{$path}' tidak ditemukan. Pastikan URL request sudah benar."
 ]);

@@ -493,6 +493,227 @@ if (preg_match('#^transactions(/([^/]+))?$#', $path, $txMatch)) {
     }
 }
 
+// RECEIPTS/SCAN — AI OCR Parser untuk Struk & Laporan Keuangan PDF/Gambar
+if ($path === 'receipts/scan' && $method === 'POST') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Sesi Anda telah berakhir. Silakan login kembali."]);
+        exit;
+    }
+
+    if (!isset($_FILES['receipt']) || $_FILES['receipt']['error'] !== UPLOAD_ERR_OK) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Harap unggah file struk (JPG, PNG, PDF)."]);
+        exit;
+    }
+
+    $file    = $_FILES['receipt'];
+    $maxSize = 5 * 1024 * 1024;
+    if ($file['size'] > $maxSize) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Ukuran file maksimal 5 MB."]);
+        exit;
+    }
+
+    $mime      = mime_content_type($file['tmp_name']);
+    $isPdf     = ($mime === 'application/pdf' || strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) === 'pdf');
+    $rawText   = '';
+
+    // ── Ekstrak teks dari PDF ──────────────────────────────────────────────────
+    if ($isPdf) {
+        $pdfContent = file_get_contents($file['tmp_name']);
+
+        // Metode 1: baca text stream dari PDF (works for text-based PDFs)
+        $rawText = '';
+        // Extract text between BT (Begin Text) and ET (End Text) markers
+        preg_match_all('/BT\s*(.*?)\s*ET/s', $pdfContent, $btMatches);
+        if (!empty($btMatches[1])) {
+            foreach ($btMatches[1] as $block) {
+                // Extract strings in parentheses  (PDF text encoding)
+                preg_match_all('/\(([^)]*)\)/', $block, $strMatches);
+                if (!empty($strMatches[1])) {
+                    $rawText .= implode(' ', $strMatches[1]) . "\n";
+                }
+                // Extract hex strings  <hex>
+                preg_match_all('/<([0-9a-fA-F]+)>/', $block, $hexMatches);
+                if (!empty($hexMatches[1])) {
+                    foreach ($hexMatches[1] as $hex) {
+                        if (strlen($hex) % 2 === 0) {
+                            $decoded = '';
+                            for ($i = 0; $i < strlen($hex); $i += 2) {
+                                $char = chr(hexdec(substr($hex, $i, 2)));
+                                if (ord($char) >= 32 && ord($char) < 127) $decoded .= $char;
+                            }
+                            if ($decoded) $rawText .= $decoded . ' ';
+                        }
+                    }
+                }
+            }
+        }
+
+        // Metode 2: fallback — cari pattern angka dan kata langsung di binary PDF
+        if (strlen(trim($rawText)) < 20) {
+            // Ambil semua printable ASCII dari PDF
+            $printable = preg_replace('/[^\x20-\x7E\n\r\t]/', ' ', $pdfContent);
+            // Cari baris yang mengandung angka besar (kemungkinan nominal)
+            $lines = explode("\n", $printable);
+            foreach ($lines as $ln) {
+                $ln = trim($ln);
+                // Ambil baris yang punya minimal 4 karakter dan ada angka
+                if (strlen($ln) > 4 && preg_match('/\d/', $ln)) {
+                    $rawText .= $ln . "\n";
+                }
+            }
+        }
+    } else {
+        // Untuk gambar — kita tidak bisa OCR tanpa library eksternal di shared hosting
+        // Tapi kita bisa return mock yang user bisa edit manual
+        $rawText = "IMAGE_UPLOAD_" . $file['name'];
+    }
+
+    // ── Parse teks menjadi item transaksi ────────────────────────────────────
+    $lines = array_filter(array_map('trim', explode("\n", $rawText)));
+
+    $items         = [];
+    $totalAmount   = 0;
+    $detectedDate  = date('Y-m-d');
+    $merchant      = '';
+    $categorySugg  = 'Lainnya (Pengeluaran)';
+    $isIncomeDoc   = false;
+
+    // Keyword pendeteksi dokumen pemasukan
+    $incomeKeywords  = ['gaji', 'salary', 'pendapatan', 'pemasukan', 'income', 'kredit', 'credit', 'transfer masuk', 'setoran', 'deposit', 'bonus', 'dividen', 'tunjangan'];
+    $expenseKeywords = ['debit', 'belanja', 'pengeluaran', 'expense', 'pembelian', 'bayar', 'pembayaran', 'tagihan', 'cicilan'];
+
+    $fullText = strtolower(implode(' ', $lines));
+
+    // Deteksi tipe dokumen
+    $incomeScore = 0;
+    $expenseScore = 0;
+    foreach ($incomeKeywords  as $kw) { if (strpos($fullText, $kw) !== false) $incomeScore++; }
+    foreach ($expenseKeywords as $kw) { if (strpos($fullText, $kw) !== false) $expenseScore++; }
+    $isIncomeDoc = $incomeScore > $expenseScore;
+
+    // Deteksi tanggal (format: dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd)
+    if (preg_match('/(\d{4}[-\/]\d{2}[-\/]\d{2})/', $rawText, $dateM)) {
+        $detectedDate = str_replace('/', '-', $dateM[1]);
+    } elseif (preg_match('/(\d{2}[-\/]\d{2}[-\/]\d{4})/', $rawText, $dateM)) {
+        $parts = preg_split('/[-\/]/', $dateM[1]);
+        $detectedDate = "{$parts[2]}-{$parts[1]}-{$parts[0]}";
+    }
+
+    // Deteksi merchant/nama bank/instansi (baris pertama biasanya nama)
+    $lineArr = array_values($lines);
+    for ($i = 0; $i < min(5, count($lineArr)); $i++) {
+        $ln = trim($lineArr[$i]);
+        // Ambil baris yang isinya kata (bukan angka murni)
+        if (strlen($ln) > 3 && !preg_match('/^\d+$/', $ln) && !preg_match('/^\d{4}-\d{2}-\d{2}/', $ln)) {
+            $merchant = $ln;
+            break;
+        }
+    }
+    if (!$merchant) $merchant = $isPdf ? 'Laporan Keuangan' : 'Struk Belanja';
+
+    // Parse item & nominal dari setiap baris
+    $amountPattern = '/(?:Rp\.?\s*)?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*$/';
+    $seenAmounts = [];
+
+    foreach ($lines as $ln) {
+        // Cari baris yang ada nominalnya di akhir
+        if (preg_match($amountPattern, $ln, $amtM)) {
+            $rawAmt = $amtM[1];
+            // Normalisasi: hapus titik ribuan, ganti koma desimal → titik
+            $rawAmt = str_replace('.', '', $rawAmt);
+            $rawAmt = str_replace(',', '.', $rawAmt);
+            $numAmt = (float)$rawAmt;
+
+            // Abaikan angka kecil (<= 100) dan duplikat
+            if ($numAmt <= 100) continue;
+            if (in_array($numAmt, $seenAmounts)) continue;
+            $seenAmounts[] = $numAmt;
+
+            $itemName = trim(preg_replace($amountPattern, '', $ln));
+            $itemName = preg_replace('/^\W+/', '', $itemName);
+            if (strlen($itemName) < 2) $itemName = ($isIncomeDoc ? 'Pemasukan' : 'Item Belanja');
+
+            // Deteksi apakah baris ini income atau expense
+            $lnLower   = strtolower($ln);
+            $lineIsInc = false;
+            foreach ($incomeKeywords as $kw) {
+                if (strpos($lnLower, $kw) !== false) { $lineIsInc = true; break; }
+            }
+
+            $items[] = [
+                "name"   => $itemName,
+                "price"  => $numAmt,
+                "type"   => $lineIsInc ? 'INCOME' : ($isIncomeDoc ? 'INCOME' : 'EXPENSE')
+            ];
+        }
+    }
+
+    // Hitung total: ambil nilai terbesar sebagai "grand total" jika ada kata TOTAL
+    $totalLine = 0;
+    foreach ($lines as $ln) {
+        if (preg_match('/total|grand total|jumlah|amount/i', $ln) && preg_match($amountPattern, $ln, $tM)) {
+            $rawT = str_replace(['.', ','], ['', '.'], $tM[1]);
+            $totalLine = (float)$rawT;
+            break;
+        }
+    }
+
+    if ($totalLine > 0) {
+        $totalAmount = $totalLine;
+    } elseif (!empty($items)) {
+        // Ambil nilai terbesar sebagai total
+        $totalAmount = max(array_column($items, 'price'));
+    }
+
+    // Kategori suggestion berdasarkan keyword
+    $catMap = [
+        'makan'       => 'Makan & Minum', 'minum' => 'Makan & Minum', 'resto' => 'Makan & Minum',
+        'bensin'      => 'Transportasi',  'grab'  => 'Transportasi', 'ojek' => 'Transportasi', 'tol' => 'Transportasi',
+        'listrik'     => 'Tagihan', 'pln' => 'Tagihan', 'telpon' => 'Tagihan', 'internet' => 'Tagihan', 'pdam' => 'Tagihan',
+        'belanja'     => 'Belanja', 'indomaret' => 'Belanja', 'alfamart' => 'Belanja', 'tokopedia' => 'Belanja', 'shopee' => 'Belanja',
+        'obat'        => 'Kesehatan', 'klinik' => 'Kesehatan', 'rumah sakit' => 'Kesehatan', 'apotik' => 'Kesehatan',
+        'netflix'     => 'Langganan', 'spotify' => 'Langganan', 'youtube' => 'Langganan',
+        'gaji'        => 'Gaji', 'salary' => 'Gaji', 'freelance' => 'Freelance',
+        'investasi'   => 'Investasi', 'saham' => 'Investasi', 'reksa' => 'Investasi',
+    ];
+    foreach ($catMap as $kw => $cat) {
+        if (strpos($fullText, $kw) !== false) { $categorySugg = $cat; break; }
+    }
+    if ($isIncomeDoc && $categorySugg === 'Lainnya (Pengeluaran)') $categorySugg = 'Gaji';
+
+    // Jika tidak ada item terdeteksi, buat 1 item placeholder yang user bisa edit
+    if (empty($items) && $totalAmount == 0) {
+        $items = [["name" => ($isIncomeDoc ? "Pemasukan" : "Pembelian"), "price" => 0, "type" => ($isIncomeDoc ? "INCOME" : "EXPENSE")]];
+    }
+
+    $receiptId = generate_uuid();
+
+    echo json_encode([
+        "success" => true,
+        "data" => [
+            "receiptId" => $receiptId,
+            "rawText"   => substr($rawText, 0, 500), // preview teks (max 500 char)
+            "extracted" => [
+                "merchant"          => $merchant,
+                "totalAmount"       => $totalAmount,
+                "date"              => $detectedDate . "T00:00:00.000Z",
+                "categorySuggestion"=> $categorySugg,
+                "isIncome"          => $isIncomeDoc,
+                "items"             => $items,
+                "confidence"        => count($items) > 0 ? "medium" : "low"
+            ]
+        ],
+        "message" => count($items) > 0
+            ? "Berhasil mengekstrak " . count($items) . " item dari dokumen. Harap periksa dan sesuaikan data."
+            : "Dokumen berhasil diproses. Harap isi nominal secara manual karena teks tidak terdeteksi otomatis."
+    ]);
+    exit;
+}
+
 // CATEGORIES
 if ($path === 'categories' && $method === 'GET') {
     $userId = get_current_user_id($pdo);
@@ -502,6 +723,7 @@ if ($path === 'categories' && $method === 'GET') {
     echo json_encode(["success" => true, "data" => $cats]);
     exit;
 }
+
 
 // BUDGETS
 if ($path === 'budgets') {

@@ -81,20 +81,21 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
         setDate(ext.date ? ext.date.split('T')[0] : new Date().toISOString().split('T')[0]);
 
         // auto pick category if suggested
+        const allCategories = categories;
         if (ext.categorySuggestion) {
-          const matched = categories.find((c) =>
+          const matched = allCategories.find((c: any) =>
             c.name.toLowerCase().includes(ext.categorySuggestion.toLowerCase())
           );
           if (matched) setCategoryId(matched.id);
-          else if (categories.length > 0) setCategoryId(categories[0].id);
-        } else if (categories.length > 0) {
-          setCategoryId(categories[0].id);
+          else if (allCategories.length > 0) setCategoryId(allCategories[0].id);
+        } else if (allCategories.length > 0) {
+          setCategoryId(allCategories[0].id);
         }
       } else {
-        setError(res.error?.message || 'Gagal mengekstrak struk.');
+        setError(res.message || res.error?.message || 'Gagal mengekstrak dokumen. Coba file lain.');
       }
     } catch (err: any) {
-      setError(err.message || 'Terjadi kesalahan saat memproses gambar.');
+      setError(err.message || 'Terjadi kesalahan saat memproses file.');
     } finally {
       setIsScanning(false);
     }
@@ -107,18 +108,23 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       return;
     }
 
+    // Deteksi tipe dari hasil scan, atau fallback ke EXPENSE
+    const docType = scanResult?.extracted?.isIncome ? 'INCOME' : 'EXPENSE';
+
     setIsSaving(true);
     try {
       await api.post('/transactions', {
-        title: merchant ? `Belanja di ${merchant}` : 'Belanja Struk',
+        title: merchant
+          ? (docType === 'INCOME' ? `Pemasukan dari ${merchant}` : `Belanja di ${merchant}`)
+          : (docType === 'INCOME' ? 'Pemasukan' : 'Belanja Struk'),
         amount: parsedAmount,
-        type: 'EXPENSE',
+        type: docType,
         categoryId: categoryId || categories[0]?.id,
-        paymentMethod: 'Tunai',
+        paymentMethod: 'Transfer Bank',
         merchant,
         transactionDate: date,
         receiptId: scanResult?.receiptId || null,
-        description: `Struk terpindai AI (${file?.name || 'struk.jpg'}). Item: ${
+        description: `Dipindai dari PDF/Struk (${file?.name || 'dokumen'}). Item: ${
           scanResult?.extracted?.items?.map((it: any) => it.name).join(', ') || '-'
         }`,
       });
@@ -132,6 +138,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
       setIsSaving(false);
     }
   };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fadeIn">

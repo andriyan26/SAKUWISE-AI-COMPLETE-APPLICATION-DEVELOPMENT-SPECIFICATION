@@ -310,27 +310,297 @@ if ($path === 'auth/logout' && $method === 'POST') {
 // DASHBOARD: SUMMARY
 if ($path === 'dashboard/summary' && $method === 'GET') {
     $userId = get_current_user_id($pdo);
+    if (!$userId) {
+        http_response_code(401);
+        echo json_encode(["success" => false, "message" => "Tidak terautentikasi."]);
+        exit;
+    }
 
-    $incomeStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND type = 'INCOME'");
-    $incomeStmt->execute([$userId]);
-    $totalIncome = (float)$incomeStmt->fetch()['total'];
+    $range = $_GET['range'] ?? 'this_month';
 
-    $expenseStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND type = 'EXPENSE'");
-    $expenseStmt->execute([$userId]);
-    $totalExpense = (float)$expenseStmt->fetch()['total'];
+    // Hitung rentang tanggal berdasarkan range
+    $now   = new DateTime();
+    switch ($range) {
+        case '7_days':
+            $start     = (new DateTime())->modify('-6 days')->format('Y-m-d 00:00:00');
+            $end       = $now->format('Y-m-d 23:59:59');
+            $prevStart = (new DateTime())->modify('-13 days')->format('Y-m-d 00:00:00');
+            $prevEnd   = (new DateTime())->modify('-7 days')->format('Y-m-d 23:59:59');
+            break;
+        case 'last_month':
+            $start     = (new DateTime('first day of last month'))->format('Y-m-d 00:00:00');
+            $end       = (new DateTime('last day of last month'))->format('Y-m-d 23:59:59');
+            $prevStart = (new DateTime('first day of -2 month'))->format('Y-m-d 00:00:00');
+            $prevEnd   = (new DateTime('last day of -2 month'))->format('Y-m-d 23:59:59');
+            break;
+        case '3_months':
+            $start     = (new DateTime())->modify('-2 months')->format('Y-m-01 00:00:00');
+            $end       = $now->format('Y-m-d 23:59:59');
+            $prevStart = (new DateTime())->modify('-5 months')->format('Y-m-01 00:00:00');
+            $prevEnd   = (new DateTime())->modify('-3 months')->format('Y-m-d 23:59:59');
+            break;
+        default: // this_month
+            $start     = (new DateTime('first day of this month'))->format('Y-m-d 00:00:00');
+            $end       = $now->format('Y-m-d 23:59:59');
+            $prevStart = (new DateTime('first day of last month'))->format('Y-m-d 00:00:00');
+            $prevEnd   = (new DateTime('last day of last month'))->format('Y-m-d 23:59:59');
+    }
 
-    $netBalance = $totalIncome - $totalExpense;
-    $savingsRate = $totalIncome > 0 ? round((($totalIncome - $totalExpense) / $totalIncome) * 100, 1) : 0;
+    // Helper: sum income/expense dalam rentang
+    function sumByType($pdo, $userId, $type, $start, $end) {
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) as total FROM transactions WHERE user_id=? AND type=? AND transaction_date BETWEEN ? AND ?");
+        $stmt->execute([$userId, $type, $start, $end]);
+        return (float)$stmt->fetch()['total'];
+    }
+
+    $income     = sumByType($pdo, $userId, 'INCOME',  $start, $end);
+    $expense    = sumByType($pdo, $userId, 'EXPENSE', $start, $end);
+    $prevIncome = sumByType($pdo, $userId, 'INCOME',  $prevStart, $prevEnd);
+    $prevExp    = sumByType($pdo, $userId, 'EXPENSE', $prevStart, $prevEnd);
+
+    // Total saldo kumulatif (semua waktu)
+    $balStmt = $pdo->prepare("SELECT
+        COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) -
+        COALESCE(SUM(CASE WHEN type='EXPENSE' THEN amount ELSE 0 END),0) as balance
+        FROM transactions WHERE user_id=?");
+    $balStmt->execute([$userId]);
+    $currentBalance = (float)$balStmt->fetch()['balance'];
+
+    // Budget sisa
+    $budgetStmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) as total FROM budgets WHERE user_id=?");
+    $budgetStmt->execute([$userId]);
+    $totalBudget = (float)$budgetStmt->fetch()['total'];
+    $budgetUsed  = $expense;
+    $budgetLeft  = max(0, $totalBudget - $budgetUsed);
+    $budgetPct   = $totalBudget > 0 ? round(($budgetUsed / $totalBudget) * 100, 1) : 0;
+
+    // Trend persentase
+    function trendPct($curr, $prev) {
+        if ($prev == 0) return $curr > 0 ? 100 : 0;
+        return round((($curr - $prev) / $prev) * 100, 1);
+    }
+
+    $savingsRate = $income > 0 ? round((($income - $expense) / $income) * 100, 1) : 0;
 
     echo json_encode([
         "success" => true,
         "data" => [
-            "netBalance" => $netBalance,
-            "totalIncome" => $totalIncome,
-            "totalExpense" => $totalExpense,
-            "savingsRate" => max(0, $savingsRate)
+            // Format lama (untuk kompatibilitas)
+            "netBalance"   => $currentBalance,
+            "totalIncome"  => $income,
+            "totalExpense" => $expense,
+            "savingsRate"  => max(0, $savingsRate),
+            // Format baru yang dipakai DashboardPage
+            "cards" => [
+                "currentBalance" => [
+                    "amount"          => $currentBalance,
+                    "label"           => "Total Saldo"
+                ],
+                "periodIncome" => [
+                    "amount"          => $income,
+                    "trendPercentage" => trendPct($income, $prevIncome),
+                    "isPositive"      => $income >= $prevIncome,
+                    "label"           => "Total Pemasukan"
+                ],
+                "periodExpense" => [
+                    "amount"          => $expense,
+                    "trendPercentage" => trendPct($expense, $prevExp),
+                    "isPositive"      => $expense <= $prevExp,
+                    "label"           => "Total Pengeluaran"
+                ],
+                "budgetRemaining" => [
+                    "amount"          => $budgetLeft,
+                    "totalBudget"     => $totalBudget,
+                    "usedPercentage"  => $budgetPct,
+                    "label"           => "Sisa Anggaran"
+                ]
+            ]
         ]
     ]);
+    exit;
+}
+
+// DASHBOARD: CASH-FLOW (grafik harian/bulanan)
+if ($path === 'dashboard/cash-flow' && $method === 'GET') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) { http_response_code(401); echo json_encode(["success"=>false,"message"=>"Tidak terautentikasi."]); exit; }
+
+    $range = $_GET['range'] ?? 'this_month';
+    $now   = new DateTime();
+    switch ($range) {
+        case '7_days':     $start = (new DateTime())->modify('-6 days')->format('Y-m-d'); $fmt = '%d %b'; break;
+        case 'last_month': $start = (new DateTime('first day of last month'))->format('Y-m-d'); $fmt = '%d'; break;
+        case '3_months':   $start = (new DateTime())->modify('-2 months')->format('Y-m-01'); $fmt = '%b'; break;
+        default:           $start = (new DateTime('first day of this month'))->format('Y-m-d'); $fmt = '%d';
+    }
+    $end = $now->format('Y-m-d');
+
+    $groupBy = ($range === '3_months') ? 'MONTH' : 'DAY';
+    $dateExpr = ($range === '3_months')
+        ? "DATE_FORMAT(transaction_date, '%Y-%m-01')"
+        : "DATE(transaction_date)";
+
+    $stmt = $pdo->prepare("
+        SELECT $dateExpr as period,
+            COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) as income,
+            COALESCE(SUM(CASE WHEN type='EXPENSE' THEN amount ELSE 0 END),0) as expense
+        FROM transactions
+        WHERE user_id=? AND DATE(transaction_date) BETWEEN ? AND ?
+        GROUP BY period
+        ORDER BY period ASC
+    ");
+    $stmt->execute([$userId, $start, $end]);
+    $rows = $stmt->fetchAll();
+
+    $chartData = array_map(function($r) {
+        $d = new DateTime($r['period']);
+        return [
+            "date"    => $r['period'],
+            "label"   => $d->format('d M'),
+            "income"  => (float)$r['income'],
+            "expense" => (float)$r['expense'],
+            "net"     => (float)$r['income'] - (float)$r['expense']
+        ];
+    }, $rows);
+
+    echo json_encode(["success" => true, "data" => $chartData]);
+    exit;
+}
+
+// DASHBOARD: EXPENSE BREAKDOWN (pie chart kategori)
+if ($path === 'dashboard/expense-breakdown' && $method === 'GET') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) { http_response_code(401); echo json_encode(["success"=>false,"message"=>"Tidak terautentikasi."]); exit; }
+
+    $range = $_GET['range'] ?? 'this_month';
+    $now   = new DateTime();
+    switch ($range) {
+        case '7_days':     $start = (new DateTime())->modify('-6 days')->format('Y-m-d 00:00:00'); break;
+        case 'last_month': $start = (new DateTime('first day of last month'))->format('Y-m-d 00:00:00'); break;
+        case '3_months':   $start = (new DateTime())->modify('-2 months')->format('Y-m-01 00:00:00'); break;
+        default:           $start = (new DateTime('first day of this month'))->format('Y-m-d 00:00:00');
+    }
+    $end = $now->format('Y-m-d 23:59:59');
+
+    $stmt = $pdo->prepare("
+        SELECT c.name, c.color, c.icon, COALESCE(SUM(t.amount),0) as total
+        FROM transactions t
+        LEFT JOIN categories c ON t.category_id = c.id
+        WHERE t.user_id=? AND t.type='EXPENSE' AND t.transaction_date BETWEEN ? AND ?
+        GROUP BY t.category_id, c.name, c.color, c.icon
+        ORDER BY total DESC
+        LIMIT 8
+    ");
+    $stmt->execute([$userId, $start, $end]);
+    $rows = $stmt->fetchAll();
+
+    $totalExp = array_sum(array_column($rows, 'total'));
+    $breakdown = array_map(function($r) use ($totalExp) {
+        return [
+            "name"       => $r['name'] ?: 'Lainnya',
+            "color"      => $r['color'] ?: '#64748B',
+            "icon"       => $r['icon']  ?: 'Tag',
+            "amount"     => (float)$r['total'],
+            "percentage" => $totalExp > 0 ? round(((float)$r['total'] / $totalExp) * 100, 1) : 0
+        ];
+    }, $rows);
+
+    echo json_encode([
+        "success" => true,
+        "data"    => [
+            "breakdown" => $breakdown,
+            "total"     => $totalExp
+        ]
+    ]);
+    exit;
+}
+
+// DASHBOARD: RECENT TRANSACTIONS
+if ($path === 'dashboard/recent-transactions' && $method === 'GET') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) { http_response_code(401); echo json_encode(["success"=>false,"message"=>"Tidak terautentikasi."]); exit; }
+
+    $stmt = $pdo->prepare("
+        SELECT t.*, c.name as cat_name, c.icon as cat_icon, c.color as cat_color
+        FROM transactions t
+        LEFT JOIN categories c ON t.category_id = c.id
+        WHERE t.user_id = ?
+        ORDER BY t.transaction_date DESC
+        LIMIT 5
+    ");
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll();
+
+    $data = array_map(function($r) {
+        return [
+            "id"              => $r['id'],
+            "title"           => $r['title'],
+            "type"            => $r['type'],
+            "amount"          => (float)$r['amount'],
+            "merchant"        => $r['merchant'],
+            "transactionDate" => $r['transaction_date'],
+            "category" => [
+                "name"  => $r['cat_name']  ?: 'Lainnya',
+                "icon"  => $r['cat_icon']  ?: 'Tag',
+                "color" => $r['cat_color'] ?: '#64748B'
+            ]
+        ];
+    }, $rows);
+
+    echo json_encode(["success" => true, "data" => $data]);
+    exit;
+}
+
+// DASHBOARD: AI INSIGHTS
+if ($path === 'dashboard/insights' && $method === 'GET') {
+    $userId = get_current_user_id($pdo);
+    if (!$userId) { http_response_code(401); echo json_encode(["success"=>false,"message"=>"Tidak terautentikasi."]); exit; }
+
+    // Hitung statistik bulan ini untuk generate insight
+    $start = (new DateTime('first day of this month'))->format('Y-m-d 00:00:00');
+    $end   = (new DateTime())->format('Y-m-d 23:59:59');
+
+    $stmt = $pdo->prepare("SELECT
+        COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) as income,
+        COALESCE(SUM(CASE WHEN type='EXPENSE' THEN amount ELSE 0 END),0) as expense,
+        COUNT(*) as txCount
+        FROM transactions WHERE user_id=? AND transaction_date BETWEEN ? AND ?");
+    $stmt->execute([$userId, $start, $end]);
+    $stats = $stmt->fetch();
+    $income  = (float)$stats['income'];
+    $expense = (float)$stats['expense'];
+    $savings = $income - $expense;
+    $savRate = $income > 0 ? round(($savings / $income) * 100) : 0;
+
+    // Top kategori pengeluaran
+    $topCatStmt = $pdo->prepare("SELECT c.name, SUM(t.amount) as total
+        FROM transactions t LEFT JOIN categories c ON t.category_id=c.id
+        WHERE t.user_id=? AND t.type='EXPENSE' AND t.transaction_date BETWEEN ? AND ?
+        GROUP BY t.category_id ORDER BY total DESC LIMIT 1");
+    $topCatStmt->execute([$userId, $start, $end]);
+    $topCat = $topCatStmt->fetch();
+
+    $insights = [];
+
+    if ($income > 0 && $savRate >= 20) {
+        $insights[] = ["type"=>"positive","icon"=>"TrendingUp","title"=>"Tabungan Bagus!","message"=>"Kamu berhasil menabung " . $savRate . "% dari pendapatanmu bulan ini. Pertahankan!"];
+    } elseif ($income > 0 && $savRate < 10) {
+        $insights[] = ["type"=>"warning","icon"=>"AlertTriangle","title"=>"Tingkat Tabungan Rendah","message"=>"Tabunganmu bulan ini hanya " . $savRate . "%. Target minimal 20% untuk keuangan sehat."];
+    }
+
+    if ($topCat && $topCat['name']) {
+        $insights[] = ["type"=>"info","icon"=>"PieChart","title"=>"Pengeluaran Terbesar","message"=>"Kategori '" . $topCat['name'] . "' adalah pengeluaran terbesar bulan ini sebesar Rp " . number_format((float)$topCat['total'], 0, ',', '.') . "."];
+    }
+
+    if ($expense > $income && $income > 0) {
+        $insights[] = ["type"=>"danger","icon"=>"AlertCircle","title"=>"Pengeluaran Melebihi Pemasukan!","message"=>"Bulan ini pengeluaranmu lebih besar dari pemasukan sebesar Rp " . number_format($expense - $income, 0, ',', '.') . ". Saatnya evaluasi."];
+    }
+
+    if (empty($insights)) {
+        $insights[] = ["type"=>"info","icon"=>"Sparkles","title"=>"Mulai Catat Transaksi!","message"=>"Semakin lengkap data transaksimu, semakin akurat analisis AI untuk membantu keputusan finansialmu."];
+    }
+
+    echo json_encode(["success" => true, "data" => $insights]);
     exit;
 }
 

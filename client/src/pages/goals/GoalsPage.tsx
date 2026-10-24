@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
 import { formatDateIndo } from '../../lib/dates.js';
@@ -39,10 +40,26 @@ export const GoalsPage: React.FC = () => {
   const [targetDate, setTargetDate] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [icon, setIcon] = useState('ShieldCheck');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Contribution State
   const [contribAmount, setContribAmount] = useState('');
   const [contribNote, setContribNote] = useState('');
+  const [contribError, setContribError] = useState<string | null>(null);
+  const [isContribSubmitting, setIsContribSubmitting] = useState(false);
+
+  // In-App Toast & Confirmation
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const fetchGoals = async () => {
     setIsLoading(true);
@@ -68,6 +85,7 @@ export const GoalsPage: React.FC = () => {
     setDescription('');
     setTargetAmount('');
     setCurrentAmount('0');
+    setFormError(null);
     const future = new Date();
     future.setMonth(future.getMonth() + 6);
     setTargetDate(future.toISOString().split('T')[0]);
@@ -80,56 +98,81 @@ export const GoalsPage: React.FC = () => {
     setEditingGoal(g);
     setName(g.name);
     setDescription(g.description || '');
-    setTargetAmount(g.targetAmount.toString());
-    setCurrentAmount(g.currentAmount.toString());
-    setTargetDate(g.targetDate.split('T')[0]);
-    setPriority(g.priority);
+    setTargetAmount(g.targetAmount ? g.targetAmount.toString() : '');
+    setCurrentAmount(g.currentAmount ? g.currentAmount.toString() : '0');
+    setFormError(null);
+    setTargetDate(g.targetDate ? g.targetDate.split('T')[0] : '');
+    setPriority(g.priority || 'MEDIUM');
     setIcon(g.icon || 'Target');
     setIsCreateOpen(true);
   };
 
   const handleGoalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     const parsedTarget = parseFloat(targetAmount);
-    if (!parsedTarget || parsedTarget <= 0) return;
 
+    if (!name.trim()) {
+      setFormError('Harap masukkan nama tujuan finansial.');
+      return;
+    }
+    if (!parsedTarget || parsedTarget <= 0) {
+      setFormError('Target nominal tabungan harus lebih dari 0.');
+      return;
+    }
+    if (!targetDate) {
+      setFormError('Harap tentukan target tanggal pencapaian.');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
       if (editingGoal) {
         await api.patch(`/goals/${editingGoal.id}`, {
-          name,
-          description,
+          name: name.trim(),
+          description: description.trim(),
           targetAmount: parsedTarget,
           currentAmount: parseFloat(currentAmount) || 0,
           targetDate,
           priority,
           icon,
         });
+        setToast({ type: 'success', message: 'Tujuan finansial berhasil diperbarui!' });
       } else {
         await api.post('/goals', {
-          name,
-          description,
+          name: name.trim(),
+          description: description.trim(),
           targetAmount: parsedTarget,
           currentAmount: parseFloat(currentAmount) || 0,
           targetDate,
           priority,
           icon,
         });
+        setToast({ type: 'success', message: 'Tujuan finansial baru berhasil dibuat!' });
       }
 
       sound.playSuccess();
       setIsCreateOpen(false);
       fetchGoals();
     } catch (err: any) {
-      alert(err.message || 'Gagal menyimpan target tabungan.');
+      setFormError(err.message || 'Gagal menyimpan target tabungan.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleContributionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setContribError(null);
     if (!contributionGoal) return;
     const parsed = parseFloat(contribAmount);
-    if (!parsed || parsed <= 0) return;
 
+    if (!parsed || parsed <= 0) {
+      setContribError('Nominal setoran tabungan harus lebih dari 0.');
+      return;
+    }
+
+    setIsContribSubmitting(true);
     try {
       const res = await api.post(`/goals/${contributionGoal.id}/contributions`, {
         amount: parsed,
@@ -143,24 +186,37 @@ export const GoalsPage: React.FC = () => {
           spread: 70,
           origin: { y: 0.6 },
         });
+        setToast({
+          type: 'success',
+          message: `Berhasil menambahkan setoran ${formatIDR(parsed)} ke "${contributionGoal.name}"!`,
+        });
         setContributionGoal(null);
         setContribAmount('');
         setContribNote('');
         fetchGoals();
+      } else {
+        setContribError(res.message || 'Gagal menambahkan setoran tabungan.');
       }
     } catch (err: any) {
-      alert(err.message || 'Gagal menambahkan setoran tabungan.');
+      setContribError(err.message || 'Gagal menambahkan setoran tabungan.');
+    } finally {
+      setIsContribSubmitting(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Yakin ingin menghapus tujuan finansial ini?')) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await api.delete(`/goals/${id}`);
+      await api.delete(`/goals/${deleteTarget.id}`);
       sound.playChirp(400, 0.1);
+      setToast({ type: 'success', message: `Target "${deleteTarget.name}" berhasil dihapus.` });
+      setDeleteTarget(null);
       fetchGoals();
     } catch (err: any) {
-      alert(err.message || 'Gagal menghapus.');
+      setToast({ type: 'error', message: err.message || 'Gagal menghapus target.' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -237,12 +293,14 @@ export const GoalsPage: React.FC = () => {
                     <button
                       onClick={() => openEditModal(g)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-brand-violet dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      title="Edit Target"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleDelete(g.id)}
+                      onClick={() => setDeleteTarget(g)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+                      title="Hapus Target"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -297,8 +355,13 @@ export const GoalsPage: React.FC = () => {
                   Target: {formatDateIndo(g.targetDate)} ({g.daysRemaining} hari lagi)
                 </span>
                 <button
-                  onClick={() => setContributionGoal(g)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-brand-violet hover:bg-brand-violet/90 text-white flex items-center gap-1 shadow-sm"
+                  onClick={() => {
+                    setContributionGoal(g);
+                    setContribAmount('');
+                    setContribNote('');
+                    setContribError(null);
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-brand-violet hover:bg-brand-violet/90 text-white flex items-center gap-1 shadow-sm transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Setor Tabungan</span>
@@ -310,157 +373,283 @@ export const GoalsPage: React.FC = () => {
       </div>
 
       {/* Create / Edit Goal Modal */}
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative transition-colors duration-200">
-            <button
-              onClick={() => setIsCreateOpen(false)}
-              className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      {isCreateOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="relative w-full max-w-lg my-auto max-h-[92vh] flex flex-col bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200">
+              <button
+                onClick={() => setIsCreateOpen(false)}
+                className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
-              {editingGoal ? 'Edit Tujuan Finansial' : 'Tambah Tujuan Finansial Baru'}
-            </h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1 shrink-0">
+                {editingGoal ? 'Edit Tujuan Finansial' : 'Tambah Tujuan Finansial Baru'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 shrink-0">
+                Wujudkan impian finansialmu dengan perencanaan target yang terukur dan rapi.
+              </p>
 
-            <form onSubmit={handleGoalSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Target</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Contoh: Dana Darurat, MacBook M3..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
+              {/* In-Modal Error Alert Banner */}
+              {formError && (
+                <div className="p-3.5 mb-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2.5 animate-fadeIn shrink-0">
+                  <X className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="flex-1 font-medium leading-relaxed">{formError}</span>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Nominal (IDR)</label>
-                <input
-                  type="number"
-                  required
-                  value={targetAmount}
-                  onChange={(e) => setTargetAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Saldo Awal Terkumpul</label>
-                <input
-                  type="number"
-                  value={currentAmount}
-                  onChange={(e) => setCurrentAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleGoalSubmit} className="space-y-4 overflow-y-auto pr-1 flex-1">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Tanggal</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Target</label>
                   <input
-                    type="date"
+                    type="text"
                     required
-                    value={targetDate}
-                    onChange={(e) => setTargetDate(e.target.value)}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Contoh: Dana Darurat, Beli Rumah, MacBook M3..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                </div>
+
+                {/* Icon Selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Ikon Kategori</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: 'Target', label: 'Umum', Icon: Target },
+                      { id: 'ShieldCheck', label: 'Darurat', Icon: ShieldCheck },
+                      { id: 'Laptop', label: 'Gadget', Icon: Laptop },
+                      { id: 'Palmtree', label: 'Liburan', Icon: Palmtree },
+                      { id: 'Car', label: 'Kendaraan', Icon: Car },
+                      { id: 'Home', label: 'Rumah', Icon: Home },
+                      { id: 'GraduationCap', label: 'Edukasi', Icon: GraduationCap },
+                    ].map((item) => {
+                      const IconComp = item.Icon;
+                      const isSelected = icon === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setIcon(item.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            isSelected
+                              ? 'bg-brand-violet text-white shadow-sm ring-2 ring-brand-violet/50'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          <IconComp className="w-3.5 h-3.5" />
+                          <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Nominal (IDR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={targetAmount}
+                    onChange={(e) => setTargetAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                  {parseFloat(targetAmount) > 0 && (
+                    <p className="text-[11px] font-semibold text-brand-teal dark:text-brand-cyan mt-1">
+                      Target: {formatIDR(parseFloat(targetAmount))}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Saldo Awal Terkumpul</label>
+                  <input
+                    type="number"
+                    value={currentAmount}
+                    onChange={(e) => setCurrentAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                  {parseFloat(currentAmount) > 0 && (
+                    <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mt-1">
+                      Saldo awal: {formatIDR(parseFloat(currentAmount))}
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Target Tanggal</label>
+                    <input
+                      type="date"
+                      required
+                      value={targetDate}
+                      onChange={(e) => setTargetDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Tingkat Prioritas</label>
+                    <select
+                      value={priority}
+                      onChange={(e) => setPriority(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    >
+                      <option value="HIGH">Tinggi (Paling Mendesak)</option>
+                      <option value="MEDIUM">Sedang (Prioritas Standar)</option>
+                      <option value="LOW">Rendah (Fleksibel)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Keterangan / Rencana</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={2}
+                    placeholder="Tujuan tabungan ini untuk keperluan masa depan..."
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Tingkat Prioritas</label>
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+
+                <div className="pt-2 sticky bottom-0 bg-white dark:bg-[#151D30] pb-1">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all disabled:opacity-50"
                   >
-                    <option value="HIGH">Tinggi (Paling Penting)</option>
-                    <option value="MEDIUM">Sedang</option>
-                    <option value="LOW">Rendah</option>
-                  </select>
+                    {isSubmitting ? 'Menyimpan...' : (editingGoal ? 'Simpan Perubahan' : 'Buat Target Finansial')}
+                  </button>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Keterangan / Rencana</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={2}
-                  placeholder="Tujuan tabungan ini untuk..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all"
-                >
-                  {editingGoal ? 'Simpan Perubahan' : 'Buat Target Finansial'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Add Contribution Modal with Explicit Balance Note */}
-      {contributionGoal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative transition-colors duration-200">
-            <button
-              onClick={() => setContributionGoal(null)}
-              className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Setor Tabungan</h3>
-            <p className="text-xs text-brand-violet dark:text-brand-cyan font-semibold mb-4">{contributionGoal.name}</p>
-
-            <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs mb-4 leading-relaxed">
-              💡 <strong>Catatan:</strong> Menambahkan setoran di sini mencatat progres target tabunganmu. Untuk mencatat mutasi pengeluaran kas sebenarnya, pastikan kamu juga mencatatnya di menu Transaksi.
-            </div>
-
-            <form onSubmit={handleContributionSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nominal Setoran (IDR)</label>
-                <input
-                  type="number"
-                  required
-                  value={contribAmount}
-                  onChange={(e) => setContribAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-base focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Catatan Setoran</label>
-                <input
-                  type="text"
-                  value={contribNote}
-                  onChange={(e) => setContribNote(e.target.value)}
-                  placeholder="Contoh: Sisihan gaji bulan September"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
+      {contributionGoal &&
+        createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="relative w-full max-w-md my-auto max-h-[92vh] flex flex-col bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200">
               <button
-                type="submit"
-                className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all"
+                onClick={() => setContributionGoal(null)}
+                className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
               >
-                Simpan Setoran Tabungan
+                <X className="w-5 h-5" />
               </button>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1 shrink-0">Setor Tabungan</h3>
+              <p className="text-xs text-brand-violet dark:text-brand-cyan font-semibold mb-3 shrink-0">{contributionGoal.name}</p>
+
+              {/* In-Modal Error Notification */}
+              {contribError && (
+                <div className="p-3 mb-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fadeIn shrink-0">
+                  <X className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="flex-1 font-medium leading-relaxed">{contribError}</span>
+                </div>
+              )}
+
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs mb-4 leading-relaxed shrink-0">
+                💡 <strong>Catatan:</strong> Menambahkan setoran di sini mencatat progres target tabunganmu. Untuk mencatat mutasi pengeluaran kas sebenarnya, pastikan kamu juga mencatatnya di menu Transaksi.
+              </div>
+
+              <form onSubmit={handleContributionSubmit} className="space-y-4 overflow-y-auto pr-1 flex-1">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nominal Setoran (IDR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={contribAmount}
+                    onChange={(e) => setContribAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-base focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                  {parseFloat(contribAmount) > 0 && (
+                    <p className="text-[11px] font-semibold text-brand-teal dark:text-brand-cyan mt-1">
+                      Setoran: {formatIDR(parseFloat(contribAmount))}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Catatan Setoran</label>
+                  <input
+                    type="text"
+                    value={contribNote}
+                    onChange={(e) => setContribNote(e.target.value)}
+                    placeholder="Contoh: Sisihan gaji bulan ini"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                </div>
+
+                <div className="pt-2 sticky bottom-0 bg-white dark:bg-[#151D30] pb-1">
+                  <button
+                    type="submit"
+                    disabled={isContribSubmitting}
+                    className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all disabled:opacity-50"
+                  >
+                    {isContribSubmitting ? 'Menyimpan...' : 'Simpan Setoran Tabungan'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Custom Confirmation Modal for Delete */}
+      {deleteTarget &&
+        createPortal(
+          <div className="fixed inset-0 z-50 p-4 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-sm bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 shadow-2xl text-center">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Hapus Target Finansial?</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                Yakin ingin menghapus target <strong className="text-slate-800 dark:text-slate-200">"{deleteTarget.name}"</strong>? Data transaksi mutasi Anda tetap aman.
+              </p>
+              <div className="flex items-center gap-2 mt-5">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Floating Toast Notification */}
+      {toast &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[100] max-w-sm px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] animate-bounce-in">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            ) : (
+              <X className="w-5 h-5 text-rose-500 shrink-0" />
+            )}
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

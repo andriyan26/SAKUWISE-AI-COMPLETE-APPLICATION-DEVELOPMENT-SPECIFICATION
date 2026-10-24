@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { useTheme } from '../../contexts/ThemeContext.js';
@@ -28,6 +29,8 @@ import {
   UploadCloud,
   Image as ImageIcon,
   Loader2,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 
 const PRESET_AVATARS = [
@@ -66,6 +69,16 @@ export const SettingsPage: React.FC = () => {
 
   const [saveMessage, setSaveMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Handle Photo File Upload directly from computer/phone
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -74,11 +87,11 @@ export const SettingsPage: React.FC = () => {
 
     // Validate image format & size
     if (!file.type.startsWith('image/')) {
-      alert('Harap pilih file gambar yang valid (JPG, PNG, WEBP, GIF).');
+      setToast({ type: 'error', message: 'Harap pilih file gambar yang valid (JPG, PNG, WEBP, GIF).' });
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('Ukuran file maksimal adalah 5 MB.');
+      setToast({ type: 'error', message: 'Ukuran file maksimal adalah 5 MB.' });
       return;
     }
 
@@ -93,16 +106,14 @@ export const SettingsPage: React.FC = () => {
         sound.playSuccess();
         setAvatarUrl(res.avatarUrl);
         updateUser({ avatarUrl: res.avatarUrl });
-        setSaveMessage('Foto profil berhasil diunggah dan disimpan!');
-        setTimeout(() => setSaveMessage(''), 3500);
+        setToast({ type: 'success', message: 'Foto profil berhasil diunggah dan disimpan!' });
       } else {
-        alert(res.message || 'Gagal mengunggah foto.');
+        setToast({ type: 'error', message: res.message || 'Gagal mengunggah foto.' });
       }
     } catch (err: any) {
-      alert(err.message || 'Terjadi kesalahan saat mengunggah foto.');
+      setToast({ type: 'error', message: err.message || 'Terjadi kesalahan saat mengunggah foto.' });
     } finally {
       setIsUploadingPhoto(false);
-      // Reset input value so same file can be chosen again if needed
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -120,11 +131,10 @@ export const SettingsPage: React.FC = () => {
       if (res.success) {
         sound.playSuccess();
         updateUser({ name, currency, avatarUrl });
-        setSaveMessage('Profil berhasil diperbarui dengan sempurna!');
-        setTimeout(() => setSaveMessage(''), 3500);
+        setToast({ type: 'success', message: 'Profil berhasil diperbarui dengan sempurna!' });
       }
     } catch (err: any) {
-      alert(err.message || 'Gagal memperbarui profil.');
+      setToast({ type: 'error', message: err.message || 'Gagal memperbarui profil.' });
     } finally {
       setIsSaving(false);
     }
@@ -147,7 +157,7 @@ export const SettingsPage: React.FC = () => {
       });
       if (res.success) {
         sound.playSuccess();
-        setPwMessage('Kata sandi berhasil diubah dan akun Anda aman.');
+        setToast({ type: 'success', message: 'Kata sandi berhasil diperbarui!' });
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -161,20 +171,16 @@ export const SettingsPage: React.FC = () => {
     window.open('http://localhost:5000/api/v1/settings/export-data', '_blank');
   };
 
-  const handleDeleteAccount = async () => {
-    if (
-      !window.confirm(
-        'PERINGATAN KRITIS: Tindakan ini akan menghapus akun dan seluruh data keuangan Anda secara permanen. Apakah Anda yakin?'
-      )
-    )
-      return;
-
+  const handleDeleteAccountConfirm = async () => {
+    setIsDeletingAccount(true);
     try {
       await api.delete('/settings/account');
       await logout();
       navigate('/login');
     } catch (err: any) {
-      alert(err.message || 'Gagal menghapus akun.');
+      setToast({ type: 'error', message: err.message || 'Gagal menghapus akun.' });
+      setIsDeletingAccount(false);
+      setDeleteConfirmOpen(false);
     }
   };
 
@@ -699,7 +705,7 @@ export const SettingsPage: React.FC = () => {
                   Menghapus akun akan memusnahkan seluruh riwayat keuangan dan sesi secara permanen tanpa opsi pemulihan.
                 </p>
                 <button
-                  onClick={handleDeleteAccount}
+                  onClick={() => setDeleteConfirmOpen(true)}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1.5 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -711,6 +717,69 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 p-4 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-sm bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 shadow-2xl text-center">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Hapus Akun Permanen?</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                Tindakan ini <strong className="text-rose-500">tidak dapat dibatalkan</strong>. Seluruh data transaksi, riwayat anggaran, target finansial, dan percakapan AI Anda akan dihapus secara permanen.
+              </p>
+              <div className="flex items-center gap-2 mt-5">
+                <button
+                  onClick={() => setDeleteConfirmOpen(false)}
+                  disabled={isDeletingAccount}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleDeleteAccountConfirm}
+                  disabled={isDeletingAccount}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-600 text-white transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {isDeletingAccount ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Floating In-App Toast */}
+      {toast &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border text-xs font-semibold backdrop-blur-md animate-slideDown max-w-sm bg-white/95 dark:bg-[#151D30]/95 border-slate-200 dark:border-[#293449]">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            )}
+            <span className="text-slate-800 dark:text-slate-200 flex-1 leading-snug">{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

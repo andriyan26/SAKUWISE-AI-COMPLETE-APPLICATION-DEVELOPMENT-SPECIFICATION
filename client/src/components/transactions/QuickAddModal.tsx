@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../lib/api-client.js';
 import { sound } from '../../lib/sound.js';
 import { X, ArrowDownRight, ArrowUpRight, Calendar, DollarSign, Tag, CreditCard } from 'lucide-react';
@@ -78,17 +79,17 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
 
   const filteredCategories = categories.filter((c) => c.type === type);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
-      <div className="w-full max-w-md bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 shadow-2xl relative transition-colors duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+      <div className="relative w-full max-w-md my-auto max-h-[92vh] flex flex-col bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200">
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Tambah Transaksi Baru</h3>
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 shrink-0">Tambah Transaksi Baru</h3>
 
         {/* Type Switcher */}
         <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-5">
@@ -124,7 +125,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
+        <form onSubmit={handleSubmit} className="space-y-3.5 overflow-y-auto pr-1 flex-1">
           {/* Amount input */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nominal (IDR)</label>
@@ -217,7 +218,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
           </div>
 
           {/* Submit */}
-          <div className="pt-2">
+          <div className="pt-2 sticky bottom-0 bg-white dark:bg-[#151D30] pb-1">
             <button
               type="submit"
               disabled={isLoading}
@@ -228,6 +229,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

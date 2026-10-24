@@ -132,3 +132,32 @@ export const api = {
   delete: <T = any>(endpoint: string, options?: RequestInit) =>
     apiRequest<T>(endpoint, { ...options, method: 'DELETE' }),
 };
+
+export { BASE_URL };
+
+export const downloadFile = async (endpoint: string, defaultFilename: string): Promise<void> => {
+  const token = localStorage.getItem('sakuwise_token');
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const separator = cleanEndpoint.includes('?') ? '&' : '?';
+  const url = `${BASE_URL}${cleanEndpoint}${token ? `${separator}token=${encodeURIComponent(token)}` : ''}`;
+
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new ApiError('Gagal mengunduh berkas.', response.status);
+  }
+
+  const blob = await response.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = defaultFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(blobUrl);
+};
+

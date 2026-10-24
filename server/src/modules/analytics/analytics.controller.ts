@@ -66,18 +66,25 @@ export const getExpensesAnalytics = async (req: AuthenticatedRequest, res: Respo
       _count: { id: true },
     });
 
-    const categories = await prisma.category.findMany({
-      where: { id: { in: breakdown.map((b) => b.categoryId) } },
-    });
+    const categoryIds = breakdown
+      .map((b) => b.categoryId)
+      .filter((id): id is string => Boolean(id && typeof id === 'string'));
+
+    const categories =
+      categoryIds.length > 0
+        ? await prisma.category.findMany({
+            where: { id: { in: categoryIds } },
+          })
+        : [];
     const catMap = new Map(categories.map((c) => [c.id, c]));
 
     const totalExpense = breakdown.reduce((acc, b) => acc + Number(b._sum.amount || 0), 0);
 
     const categoryStats = breakdown.map((b) => {
       const amount = Number(b._sum.amount || 0);
-      const cat = catMap.get(b.categoryId);
+      const cat = b.categoryId ? catMap.get(b.categoryId) : undefined;
       return {
-        categoryId: b.categoryId,
+        categoryId: b.categoryId || 'unknown',
         name: cat?.name || 'Lainnya',
         icon: cat?.icon || 'Tag',
         color: cat?.color || '#64748B',
@@ -119,9 +126,16 @@ export const getIncomeAnalytics = async (req: AuthenticatedRequest, res: Respons
       _count: { id: true },
     });
 
-    const categories = await prisma.category.findMany({
-      where: { id: { in: breakdown.map((b) => b.categoryId) } },
-    });
+    const incomeCategoryIds = breakdown
+      .map((b) => b.categoryId)
+      .filter((id): id is string => Boolean(id && typeof id === 'string'));
+
+    const categories =
+      incomeCategoryIds.length > 0
+        ? await prisma.category.findMany({
+            where: { id: { in: incomeCategoryIds } },
+          })
+        : [];
     const catMap = new Map(categories.map((c) => [c.id, c]));
 
     const totalIncome = breakdown.reduce((acc, b) => acc + Number(b._sum.amount || 0), 0);

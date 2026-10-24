@@ -42,3 +42,6 @@ server/uploads/*
 # Large Media
 *.mp4
 *.webm
+
+# Archive & Distribution
+*.zip

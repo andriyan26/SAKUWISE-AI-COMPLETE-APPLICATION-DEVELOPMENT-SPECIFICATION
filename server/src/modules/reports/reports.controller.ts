@@ -29,7 +29,7 @@ export const generateReport = async (req: AuthenticatedRequest, res: Response): 
       if (t.type === 'INCOME') totalIncome += amt;
       if (t.type === 'EXPENSE') totalExpense += amt;
 
-      const catName = t.category.name;
+      const catName = t.category?.name || 'Lainnya';
       const existing = categoryTotals.get(catName) || { name: catName, type: t.type, total: 0, count: 0 };
       existing.total += amt;
       existing.count += 1;
@@ -100,7 +100,7 @@ export const generateReport = async (req: AuthenticatedRequest, res: Response): 
           id: t.id,
           date: t.transactionDate.toISOString().split('T')[0],
           title: t.title,
-          category: t.category.name,
+          category: t.category?.name || 'Lainnya',
           type: t.type,
           amount: Number(t.amount),
           paymentMethod: t.paymentMethod,

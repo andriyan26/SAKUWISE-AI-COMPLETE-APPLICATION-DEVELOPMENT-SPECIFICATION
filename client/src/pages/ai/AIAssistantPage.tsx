@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { api } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
@@ -33,6 +34,14 @@ export const AIAssistantPage: React.FC = () => {
   const [isThinking, setIsThinking] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedbackGiven, setFeedbackGiven] = useState<{ [key: string]: boolean }>({});
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Memories tab / modal
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
@@ -158,11 +167,11 @@ export const AIAssistantPage: React.FC = () => {
 
       if (res.success) {
         sound.playSuccess();
-        alert('Aksi rekomendasi AI berhasil diterapkan!');
+        setToast({ type: 'success', message: 'Aksi rekomendasi AI berhasil diterapkan!' });
         handleSendMessage('Saya telah mengonfirmasi aksi tersebut. Terima kasih!');
       }
     } catch (err: any) {
-      alert(err.message || 'Gagal menerapkan aksi.');
+      setToast({ type: 'error', message: err.message || 'Gagal menerapkan aksi.' });
     }
   };
 
@@ -519,6 +528,23 @@ export const AIAssistantPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Floating Toast Notification */}
+      {toast &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[100] max-w-sm px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] animate-bounce-in">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            ) : (
+              <X className="w-5 h-5 text-rose-500 shrink-0" />
+            )}
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

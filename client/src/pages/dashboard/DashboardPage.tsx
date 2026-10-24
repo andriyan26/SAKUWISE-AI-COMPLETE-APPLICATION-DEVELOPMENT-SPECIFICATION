@@ -38,7 +38,7 @@ export const DashboardPage: React.FC = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
 
-  const [dateRange, setDateRange] = useState('this_month');
+  const [dateRange, setDateRange] = useState('all');
   const [summaryData, setSummaryData] = useState<any>(null);
   const [cashFlowData, setCashFlowData] = useState<any[]>([]);
   const [expenseBreakdown, setExpenseBreakdown] = useState<any>(null);
@@ -50,7 +50,7 @@ export const DashboardPage: React.FC = () => {
   const fetchDashboardData = async () => {
     setIsLoading(true);
     try {
-      const [summaryRes, cashFlowRes, expenseRes, recentRes, insightsRes, goalsRes] = await Promise.all([
+      const [summaryRes, cashFlowRes, expenseRes, recentRes, insightsRes, goalsRes] = await Promise.allSettled([
         api.get(`/dashboard/summary?range=${dateRange}`),
         api.get(`/dashboard/cash-flow?range=${dateRange}`),
         api.get(`/dashboard/expense-breakdown?range=${dateRange}`),
@@ -59,12 +59,12 @@ export const DashboardPage: React.FC = () => {
         api.get('/goals'),
       ]);
 
-      if (summaryRes.success) setSummaryData(summaryRes.data);
-      if (cashFlowRes.success) setCashFlowData(cashFlowRes.data);
-      if (expenseRes.success) setExpenseBreakdown(expenseRes.data);
-      if (recentRes.success) setRecentTransactions(recentRes.data);
-      if (insightsRes.success) setInsights(insightsRes.data);
-      if (goalsRes.success) setSavingsGoals(goalsRes.data);
+      if (summaryRes.status === 'fulfilled' && summaryRes.value?.success) setSummaryData(summaryRes.value.data);
+      if (cashFlowRes.status === 'fulfilled' && cashFlowRes.value?.success) setCashFlowData(cashFlowRes.value.data);
+      if (expenseRes.status === 'fulfilled' && expenseRes.value?.success) setExpenseBreakdown(expenseRes.value.data);
+      if (recentRes.status === 'fulfilled' && recentRes.value?.success) setRecentTransactions(recentRes.value.data);
+      if (insightsRes.status === 'fulfilled' && insightsRes.value?.success) setInsights(insightsRes.value.data);
+      if (goalsRes.status === 'fulfilled' && goalsRes.value?.success) setSavingsGoals(goalsRes.value.data);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -78,9 +78,15 @@ export const DashboardPage: React.FC = () => {
     const handleUpdate = () => fetchDashboardData();
     window.addEventListener('transaction-updated', handleUpdate);
     return () => window.removeEventListener('transaction-updated', handleUpdate);
-  }, [dateRange]);
+  }, []);
 
   const cards = summaryData?.cards;
+  const totalBalance = Number(cards?.currentBalance?.amount ?? (Number(cards?.periodIncome?.amount ?? summaryData?.totalIncome ?? 0) - Number(cards?.periodExpense?.amount ?? summaryData?.totalExpense ?? 0)));
+  const totalIncome = Number(cards?.periodIncome?.amount ?? summaryData?.totalIncome ?? 0);
+  const totalExpense = Number(cards?.periodExpense?.amount ?? summaryData?.totalExpense ?? 0);
+  const remainingBudgetAmount = Number(cards?.remainingBudget?.amount ?? cards?.budgetRemaining?.amount ?? 0);
+  const remainingBudgetLimit = Number(cards?.remainingBudget?.limit ?? cards?.budgetRemaining?.totalBudget ?? 0);
+  const budgetUsagePercent = Number(cards?.remainingBudget?.usagePercent ?? cards?.budgetRemaining?.usedPercentage ?? 0);
 
   const COLORS = ['#635BFF', '#14B8A6', '#EC4899', '#F59E0B', '#38BDF8', '#8B5CF6', '#10B981', '#64748B'];
 
@@ -94,30 +100,16 @@ export const DashboardPage: React.FC = () => {
             <span className="inline-block animate-wave">👋</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Berikut ringkasan kondisi keuanganmu hari ini • {formatDateIndo(new Date())}
+            Ringkasan kondisi finansialmu hari ini • {formatDateIndo(new Date())}
           </p>
         </div>
 
-        {/* Date Range Selector */}
-        <div className="flex items-center gap-1.5 p-1 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-2xl self-start md:self-auto shadow-sm">
-          {[
-            { id: '7_days', label: '7 Hari' },
-            { id: 'this_month', label: 'Bulan Ini' },
-            { id: 'last_month', label: 'Bulan Lalu' },
-            { id: '3_months', label: '3 Bulan' },
-          ].map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setDateRange(r.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                dateRange === r.id
-                  ? 'bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
+        {/* Lifetime All-Time Indicator Badge */}
+        <div className="flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-2xl self-start md:self-auto shadow-sm">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+            Akumulasi Keseluruhan Transaksi
+          </span>
         </div>
       </div>
 
@@ -133,10 +125,10 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {formatIDR(cards?.currentBalance?.amount || 0)}
+              {formatIDR(totalBalance)}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
-              <span>Arus kas neto kumulatif akun</span>
+              <span>Arus kas bersih riil dari seluruh transaksi</span>
             </div>
           </div>
         </div>
@@ -151,20 +143,10 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
-              {formatIDR(cards?.periodIncome?.amount || 0)}
+              {formatIDR(totalIncome)}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
-              {cards?.periodIncome?.trendPercentage !== 0 && (
-                <span
-                  className={`flex items-center font-bold ${
-                    cards?.periodIncome?.isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'
-                  }`}
-                >
-                  {cards?.periodIncome?.isPositive ? '+' : ''}
-                  {cards?.periodIncome?.trendPercentage}%
-                </span>
-              )}
-              <span>vs periode sebelumnya</span>
+              <span className="text-emerald-500 font-semibold">Akumulasi seluruh transaksi masuk</span>
             </div>
           </div>
         </div>
@@ -179,20 +161,10 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-rose-500 dark:text-rose-400 tracking-tight">
-              {formatIDR(cards?.periodExpense?.amount || 0)}
+              {formatIDR(totalExpense)}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
-              {cards?.periodExpense?.trendPercentage !== 0 && (
-                <span
-                  className={`flex items-center font-bold ${
-                    cards?.periodExpense?.isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'
-                  }`}
-                >
-                  {cards?.periodExpense?.trendPercentage > 0 ? '+' : ''}
-                  {cards?.periodExpense?.trendPercentage}%
-                </span>
-              )}
-              <span>vs periode sebelumnya</span>
+              <span className="text-rose-400 font-semibold">Akumulasi seluruh transaksi keluar</span>
             </div>
           </div>
         </div>
@@ -206,13 +178,32 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-amber-600 dark:text-amber-300 tracking-tight">
-              {formatIDR(cards?.remainingBudget?.amount || 0)}
-            </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
-              <span>Terpakai {cards?.remainingBudget?.usagePercent || 0}%</span>
-              <span>Batas {formatIDR(cards?.remainingBudget?.limit || 0)}</span>
-            </div>
+            {remainingBudgetLimit > 0 ? (
+              <>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-300 tracking-tight">
+                  {formatIDR(remainingBudgetAmount)}
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
+                  <span>Terpakai {budgetUsagePercent}%</span>
+                  <span>Batas {formatIDR(remainingBudgetLimit)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-lg font-bold text-slate-700 dark:text-slate-300 tracking-tight">
+                  Rp 0
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
+                  <span>Batas belum diatur</span>
+                  <button
+                    onClick={() => navigate('/budgets')}
+                    className="text-brand-violet dark:text-brand-cyan font-bold hover:underline"
+                  >
+                    + Atur Anggaran
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -249,7 +240,7 @@ export const DashboardPage: React.FC = () => {
                     <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" stroke="#64748B" fontSize={11} tickLine={false} />
+                <XAxis dataKey="date" stroke="#64748B" fontSize={11} tickLine={false} minTickGap={20} />
                 <YAxis
                   stroke="#64748B"
                   fontSize={11}
@@ -293,65 +284,84 @@ export const DashboardPage: React.FC = () => {
         <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] shadow-sm dark:shadow-xl flex flex-col justify-between animate-fade-in-up stagger-3">
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Distribusi Pengeluaran</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Berdasarkan kategori pengeluaran</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Akumulasi pengeluaran berdasarkan kategori</p>
           </div>
 
-          <div className="relative h-60 w-full flex items-center justify-center my-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={expenseBreakdown?.items || []}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={55}
-                  outerRadius={80}
-                  paddingAngle={4}
-                  dataKey="amount"
-                >
-                  {(expenseBreakdown?.items || []).map((_: any, index: number) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+          {(() => {
+            const breakdownItems = (expenseBreakdown?.items || expenseBreakdown?.breakdown || []) as any[];
+            const totalExpenseAmount = Number(expenseBreakdown?.totalExpense ?? expenseBreakdown?.total ?? totalExpense);
+
+            return breakdownItems.length > 0 && totalExpenseAmount > 0 ? (
+              <>
+                <div className="relative h-60 w-full flex items-center justify-center my-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={breakdownItems}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="amount"
+                      >
+                        {breakdownItems.map((_: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: theme === 'dark' ? '#0F172A' : '#FFFFFF',
+                          borderColor: theme === 'dark' ? '#334155' : '#E2E8F0',
+                          borderRadius: '12px',
+                          color: theme === 'dark' ? '#FFFFFF' : '#0F172A',
+                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                        }}
+                        formatter={(val: any) => [formatIDR(val), 'Jumlah']}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {/* Total in center */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total</span>
+                    <span className="text-sm font-extrabold text-slate-900 dark:text-white">
+                      {formatIDR(totalExpenseAmount)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Category Legends */}
+                <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  {breakdownItems.slice(0, 5).map((item: any, idx: number) => (
+                    <div key={item.categoryId || idx} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: COLORS[idx % COLORS.length] }}
+                        />
+                        <span className="text-slate-700 dark:text-slate-300 truncate max-w-[120px]">{item.categoryName || item.name}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-slate-900 dark:text-white">{item.percentage}%</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 ml-1.5">({formatIDR(item.amount)})</span>
+                      </div>
+                    </div>
                   ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: theme === 'dark' ? '#0F172A' : '#FFFFFF',
-                    borderColor: theme === 'dark' ? '#334155' : '#E2E8F0',
-                    borderRadius: '12px',
-                    color: theme === 'dark' ? '#FFFFFF' : '#0F172A',
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
-                  }}
-                  formatter={(val: any) => [formatIDR(val), 'Jumlah']}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-
-            {/* Total in center */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total</span>
-              <span className="text-sm font-extrabold text-slate-900 dark:text-white">
-                {formatIDR(expenseBreakdown?.totalExpense || 0)}
-              </span>
-            </div>
-          </div>
-
-          {/* Category Legends */}
-          <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-            {(expenseBreakdown?.items || []).slice(0, 4).map((item: any, idx: number) => (
-              <div key={item.categoryId} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: COLORS[idx % COLORS.length] }}
-                  />
-                  <span className="text-slate-700 dark:text-slate-300 truncate max-w-[120px]">{item.categoryName}</span>
                 </div>
-                <div className="text-right">
-                  <span className="font-bold text-slate-900 dark:text-white">{item.percentage}%</span>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 ml-1.5">({formatIDR(item.amount)})</span>
+              </>
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center text-center p-4">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-3">
+                  <PieIcon className="w-6 h-6 opacity-60 text-brand-violet" />
                 </div>
+                <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Belum Ada Pengeluaran</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 max-w-[200px]">
+                  Catat transaksi pengeluaran untuk melihat grafik kategori secara otomatis.
+                </p>
               </div>
-            ))}
-          </div>
+            );
+          })()}
         </div>
       </div>
 

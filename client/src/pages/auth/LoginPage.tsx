@@ -35,8 +35,26 @@ export const LoginPage: React.FC = () => {
   // Audio mute state
   const [isMuted, setIsMuted] = useState(sound.muted);
 
+  // Responsive device check for mobile (HP) vs Desktop
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Mouse tracking for mascot eye gaze
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // Quick skip for desktop animation
+  const skipAnimation = () => {
+    setAnimPhase(6);
+    setMascotState('idle');
+    setSpeechText('');
+  };
 
   // Story Animation Sequence:
   // Phase 1 (0s - 2.0s): Mascot enters on the LEFT (muncul awal di sebelah kiri)
@@ -139,11 +157,13 @@ export const LoginPage: React.FC = () => {
     };
     window.addEventListener('click', handleFirstGesture);
     window.addEventListener('keydown', handleFirstGesture);
+    window.addEventListener('touchstart', handleFirstGesture);
 
     return () => {
       if (cleanupAnim) cleanupAnim();
       window.removeEventListener('click', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
+      window.removeEventListener('touchstart', handleFirstGesture);
     };
   }, [showPreloader]);
 
@@ -258,6 +278,17 @@ export const LoginPage: React.FC = () => {
 
   // Precise coordinate positioning for the mascot during each story phase
   const getMascotStyle = (): React.CSSProperties => {
+    if (isMobile) {
+      return {
+        position: 'relative',
+        transform: 'none',
+        transition: 'all 0.3s ease-out',
+        opacity: 1,
+        zIndex: 30,
+        marginBottom: '0.5rem',
+      };
+    }
+
     switch (animPhase) {
       case 0:
         // Off-screen left at start
@@ -332,6 +363,14 @@ export const LoginPage: React.FC = () => {
 
   // Precise positioning for the Login Card during each story phase
   const getCardStyle = (): React.CSSProperties => {
+    if (isMobile) {
+      return {
+        transform: 'none',
+        opacity: 1,
+        pointerEvents: 'auto',
+      };
+    }
+
     if (animPhase < 4) {
       // Parked off-screen to the right in Phase 0, 1, 2, 3
       return {
@@ -361,7 +400,7 @@ export const LoginPage: React.FC = () => {
   return (
     <div
       onMouseMove={handleMouseMove}
-      className="relative min-h-screen w-full bg-[#0B1020] text-slate-100 flex flex-col justify-between overflow-hidden select-none"
+      className="relative min-h-screen w-full bg-[#0B1020] text-slate-100 flex flex-col justify-between overflow-x-hidden select-none"
       style={{
         backgroundImage: `radial-gradient(circle at 50% 25%, rgba(99, 91, 255, 0.16) 0%, transparent 65%), radial-gradient(circle at 85% 85%, rgba(20, 184, 166, 0.12) 0%, transparent 55%)`,
       }}
@@ -385,8 +424,8 @@ export const LoginPage: React.FC = () => {
       <div className="absolute bottom-10 right-8 w-80 h-80 bg-brand-teal/15 rounded-full blur-3xl pointer-events-none animate-pulseGlow" />
 
       {/* Main Experience Arena */}
-      <main className="relative z-30 flex-1 w-full flex items-center justify-center px-4 py-8">
-        <div className="relative w-full max-w-6xl min-h-[640px] flex items-center justify-center overflow-hidden">
+      <main className="relative z-30 flex-1 w-full flex items-center justify-center px-4 py-6 sm:py-8">
+        <div className={`relative w-full max-w-6xl flex items-center justify-center ${isMobile ? 'flex-col gap-4' : 'min-h-[640px] overflow-hidden'}`}>
 
           {/* ============================================================
               DYNAMIC MASCOT ACTOR
@@ -406,14 +445,16 @@ export const LoginPage: React.FC = () => {
               }}
               title="Klik aku untuk mendengarkan suara!"
             >
-              <SakuMascot3D
-                state={mascotState}
-                speechText={speechText}
-                mousePos={mousePos}
-              />
+              <div className="transform scale-90 sm:scale-100 origin-bottom">
+                <SakuMascot3D
+                  state={mascotState}
+                  speechText={speechText}
+                  mousePos={mousePos}
+                />
+              </div>
 
               {/* Status Badge below Mascot */}
-              <div className="mt-3 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] font-semibold text-slate-300 flex items-center gap-2 shadow-lg backdrop-blur-md">
+              <div className="mt-2 sm:mt-3 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] font-semibold text-slate-300 flex items-center gap-2 shadow-lg backdrop-blur-md">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                 <span>SAKUWISE AI • {animPhase === 4 ? 'Memuat Pusat Data...' : animPhase === 3 ? 'Mengamankan Sesi...' : 'Asisten Finansial Cerdas'}</span>
               </div>
@@ -421,10 +462,9 @@ export const LoginPage: React.FC = () => {
           </div>
 
           {/* ============================================================
-              PULLING ENERGY TETHER / CABLE (Visible during Phase 4)
-              Renders glowing neon holographic tether while pulling to center
+              PULLING ENERGY TETHER / CABLE (Visible during Phase 4 on Desktop)
               ============================================================ */}
-          {animPhase === 4 && (
+          {animPhase === 4 && !isMobile && (
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none z-35 overflow-visible"
               viewBox="0 0 1000 600"
@@ -643,6 +683,17 @@ export const LoginPage: React.FC = () => {
         >
           {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-brand-teal" />}
         </button>
+
+        {/* Skip Animation for quick login on desktop */}
+        {!isMobile && animPhase < 5 && (
+          <button
+            onClick={skipAnimation}
+            title="Lewati animasi dan langsung ke formulir login"
+            className="px-2.5 py-1 text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-full transition-colors"
+          >
+            Lewati
+          </button>
+        )}
       </div>
 
       {/* Footer */}

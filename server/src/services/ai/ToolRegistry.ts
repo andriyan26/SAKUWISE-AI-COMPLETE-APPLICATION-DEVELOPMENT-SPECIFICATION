@@ -63,9 +63,16 @@ export class ToolRegistry {
       _count: { id: true },
     });
 
-    const categories = await prisma.category.findMany({
-      where: { id: { in: breakdown.map((b) => b.categoryId) } },
-    });
+    const categoryIds = breakdown
+      .map((b) => b.categoryId)
+      .filter((id): id is string => Boolean(id && typeof id === 'string'));
+
+    const categories =
+      categoryIds.length > 0
+        ? await prisma.category.findMany({
+            where: { id: { in: categoryIds } },
+          })
+        : [];
     const catMap = new Map(categories.map((c) => [c.id, c.name]));
 
     const totalExpense = breakdown.reduce((acc, b) => acc + Number(b._sum.amount || 0), 0);

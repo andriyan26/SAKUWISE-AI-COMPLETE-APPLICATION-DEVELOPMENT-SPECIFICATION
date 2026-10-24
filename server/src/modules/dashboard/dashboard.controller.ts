@@ -73,44 +73,52 @@ export const getDashboardSummary = async (req: AuthenticatedRequest, res: Respon
     });
     const currentBalance = allTimeIncome - allTimeExpense;
 
-    // 2. Period income & expense
-    const currentPeriodAgg = await prisma.transaction.groupBy({
-      by: ['type'],
-      where: {
-        userId,
-        transactionDate: { gte: start, lte: end },
-      },
-      _sum: { amount: true },
-    });
-
     let periodIncome = 0;
     let periodExpense = 0;
-    currentPeriodAgg.forEach((agg) => {
-      const val = agg._sum.amount ? Number(agg._sum.amount) : 0;
-      if (agg.type === 'INCOME') periodIncome += val;
-      if (agg.type === 'EXPENSE') periodExpense += val;
-    });
+    let incomeTrend = 0;
+    let expenseTrend = 0;
 
-    // 3. Previous period income & expense for trend
-    const prevPeriodAgg = await prisma.transaction.groupBy({
-      by: ['type'],
-      where: {
-        userId,
-        transactionDate: { gte: prevStart, lte: prevEnd },
-      },
-      _sum: { amount: true },
-    });
+    if (range === 'all') {
+      periodIncome = allTimeIncome;
+      periodExpense = allTimeExpense;
+    } else {
+      // 2. Period income & expense
+      const currentPeriodAgg = await prisma.transaction.groupBy({
+        by: ['type'],
+        where: {
+          userId,
+          transactionDate: { gte: start, lte: end },
+        },
+        _sum: { amount: true },
+      });
 
-    let prevIncome = 0;
-    let prevExpense = 0;
-    prevPeriodAgg.forEach((agg) => {
-      const val = agg._sum.amount ? Number(agg._sum.amount) : 0;
-      if (agg.type === 'INCOME') prevIncome += val;
-      if (agg.type === 'EXPENSE') prevExpense += val;
-    });
+      currentPeriodAgg.forEach((agg) => {
+        const val = agg._sum.amount ? Number(agg._sum.amount) : 0;
+        if (agg.type === 'INCOME') periodIncome += val;
+        if (agg.type === 'EXPENSE') periodExpense += val;
+      });
 
-    const incomeTrend = prevIncome > 0 ? Math.round(((periodIncome - prevIncome) / prevIncome) * 100) : 0;
-    const expenseTrend = prevExpense > 0 ? Math.round(((periodExpense - prevExpense) / prevExpense) * 100) : 0;
+      // 3. Previous period income & expense for trend
+      const prevPeriodAgg = await prisma.transaction.groupBy({
+        by: ['type'],
+        where: {
+          userId,
+          transactionDate: { gte: prevStart, lte: prevEnd },
+        },
+        _sum: { amount: true },
+      });
+
+      let prevIncome = 0;
+      let prevExpense = 0;
+      prevPeriodAgg.forEach((agg) => {
+        const val = agg._sum.amount ? Number(agg._sum.amount) : 0;
+        if (agg.type === 'INCOME') prevIncome += val;
+        if (agg.type === 'EXPENSE') prevExpense += val;
+      });
+
+      incomeTrend = prevIncome > 0 ? Math.round(((periodIncome - prevIncome) / prevIncome) * 100) : 0;
+      expenseTrend = prevExpense > 0 ? Math.round(((periodExpense - prevExpense) / prevExpense) * 100) : 0;
+    }
 
     // 4. Remaining budget for active budgets
     const activeBudgets = await prisma.budget.findMany({
@@ -185,13 +193,15 @@ export const getDashboardSummary = async (req: AuthenticatedRequest, res: Respon
 export const getDashboardCashFlow = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;
-    const { range = 'this_month', startDate, endDate } = req.query as Record<string, string>;
-    const { start, end } = getDateRange(range, startDate, endDate);
+    const { range = 'all', startDate, endDate } = req.query as Record<string, string>;
 
     const transactions = await prisma.transaction.findMany({
       where: {
         userId,
-        transactionDate: { gte: start, lte: end },
+        ...(range === 'all' ? {} : (() => {
+          const { start, end } = getDateRange(range, startDate, endDate);
+          return { transactionDate: { gte: start, lte: end } };
+        })()),
       },
       select: {
         amount: true,
@@ -201,27 +211,18 @@ export const getDashboardCashFlow = async (req: AuthenticatedRequest, res: Respo
       orderBy: { transactionDate: 'asc' },
     });
 
-    // Group by date (day)
+    // Group by date
     const pointsMap = new Map<string, { date: string; income: number; expense: number; net: number }>();
-
-    // Pre-fill days in range
-    const curr = new Date(start);
-    while (curr <= end) {
-      const dateKey = curr.toISOString().split('T')[0];
-      const dayFormatted = curr.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-      pointsMap.set(dateKey, { date: dayFormatted, income: 0, expense: 0, net: 0 });
-      curr.setDate(curr.getDate() + 1);
-    }
 
     transactions.forEach((t) => {
       const dateKey = t.transactionDate.toISOString().split('T')[0];
-      const point = pointsMap.get(dateKey);
-      if (point) {
-        const val = Number(t.amount);
-        if (t.type === 'INCOME') point.income += val;
-        if (t.type === 'EXPENSE') point.expense += val;
-        point.net = point.income - point.expense;
-      }
+      const dayFormatted = t.transactionDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+      const point = pointsMap.get(dateKey) || { date: dayFormatted, income: 0, expense: 0, net: 0 };
+      const val = Number(t.amount);
+      if (t.type === 'INCOME') point.income += val;
+      if (t.type === 'EXPENSE') point.expense += val;
+      point.net = point.income - point.expense;
+      pointsMap.set(dateKey, point);
     });
 
     const series = Array.from(pointsMap.values());
@@ -236,25 +237,34 @@ export const getDashboardCashFlow = async (req: AuthenticatedRequest, res: Respo
 export const getDashboardExpenseBreakdown = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;
-    const { range = 'this_month', startDate, endDate } = req.query as Record<string, string>;
-    const { start, end } = getDateRange(range, startDate, endDate);
+    const { range = 'all', startDate, endDate } = req.query as Record<string, string>;
 
     const breakdown = await prisma.transaction.groupBy({
       by: ['categoryId'],
       where: {
         userId,
         type: 'EXPENSE',
-        transactionDate: { gte: start, lte: end },
+        ...(range === 'all' ? {} : (() => {
+          const { start, end } = getDateRange(range, startDate, endDate);
+          return { transactionDate: { gte: start, lte: end } };
+        })()),
       },
       _sum: { amount: true },
       _count: { id: true },
     });
 
-    const categories = await prisma.category.findMany({
-      where: {
-        id: { in: breakdown.map((b) => b.categoryId) },
-      },
-    });
+    const categoryIds = breakdown
+      .map((b) => b.categoryId)
+      .filter((id): id is string => Boolean(id && typeof id === 'string'));
+
+    const categories =
+      categoryIds.length > 0
+        ? await prisma.category.findMany({
+            where: {
+              id: { in: categoryIds },
+            },
+          })
+        : [];
 
     const catMap = new Map(categories.map((c) => [c.id, c]));
 
@@ -263,9 +273,9 @@ export const getDashboardExpenseBreakdown = async (req: AuthenticatedRequest, re
     const data = breakdown
       .map((b) => {
         const amount = Number(b._sum.amount || 0);
-        const cat = catMap.get(b.categoryId);
+        const cat = b.categoryId ? catMap.get(b.categoryId) : undefined;
         return {
-          categoryId: b.categoryId,
+          categoryId: b.categoryId || 'unknown',
           categoryName: cat?.name || 'Lainnya',
           icon: cat?.icon || 'MoreHorizontal',
           color: cat?.color || '#64748B',
@@ -337,7 +347,7 @@ export const getDashboardInsights = async (req: AuthenticatedRequest, res: Respo
         totalIncome += val;
       } else {
         totalExpense += val;
-        const catName = t.category.name;
+        const catName = t.category?.name || 'Lainnya';
         categoryExpenseMap.set(catName, (categoryExpenseMap.get(catName) || 0) + val);
       }
     });

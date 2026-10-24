@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../../lib/api-client.js';
+import { createPortal } from 'react-dom';
+import { api, downloadFile } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
 import { formatDateIndo } from '../../lib/dates.js';
 import { sound } from '../../lib/sound.js';
@@ -17,6 +18,7 @@ import {
   ChevronRight,
   X,
   Sparkles,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const TransactionsPage: React.FC = () => {
@@ -50,6 +52,16 @@ export const TransactionsPage: React.FC = () => {
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formNotes, setFormNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const fetchTransactions = async () => {
     setIsLoading(true);
@@ -67,7 +79,6 @@ export const TransactionsPage: React.FC = () => {
       const res = await api.get(`/transactions?${params.toString()}`);
       if (res.success) {
         setTransactions(res.data ?? []);
-        // ✅ Null-safe: PHP bridge lama tidak mengirim pagination/summary → pakai default
         setPagination(res.pagination ?? { page: 1, totalPages: 1, total: res.data?.length ?? 0 });
         setSummary(res.summary ?? { totalIncome: 0, totalExpense: 0, netCashFlow: 0 });
       }
@@ -77,7 +88,6 @@ export const TransactionsPage: React.FC = () => {
       setIsLoading(false);
     }
   };
-
 
   const fetchCategories = async () => {
     try {
@@ -94,8 +104,13 @@ export const TransactionsPage: React.FC = () => {
     fetchTransactions();
   }, [search, type, categoryId, paymentMethod, page, sortBy, sortOrder]);
 
-  const handleExportCsv = () => {
-    window.open('http://localhost:5000/api/v1/transactions/export/csv', '_blank');
+  const handleExportCsv = async () => {
+    try {
+      await downloadFile('/transactions/export/csv', `sakuwise_transaksi_${new Date().toISOString().split('T')[0]}.csv`);
+      setToast({ type: 'success', message: 'Laporan transaksi CSV berhasil diunduh!' });
+    } catch (e: any) {
+      setToast({ type: 'error', message: e.message || 'Gagal mengekspor CSV.' });
+    }
   };
 
   const openCreateModal = () => {
@@ -103,6 +118,7 @@ export const TransactionsPage: React.FC = () => {
     setFormTitle('');
     setFormAmount('');
     setFormType('EXPENSE');
+    setFormError(null);
     const firstCat = categories.find((c) => c.type === 'EXPENSE');
     setFormCategoryId(firstCat ? firstCat.id : '');
     setFormPaymentMethod('Transfer Bank');
@@ -117,48 +133,62 @@ export const TransactionsPage: React.FC = () => {
     setFormTitle(tx.title);
     setFormAmount(tx.amount.toString());
     setFormType(tx.type);
+    setFormError(null);
     setFormCategoryId(tx.categoryId);
     setFormPaymentMethod(tx.paymentMethod);
     setFormMerchant(tx.merchant || '');
-    setFormDate(tx.transactionDate.split('T')[0]);
+    setFormDate(tx.transactionDate ? tx.transactionDate.split('T')[0] : '');
     setFormNotes(tx.description || '');
     setIsFormOpen(true);
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     const parsedAmount = parseFloat(formAmount);
-    if (!parsedAmount || parsedAmount <= 0) return;
+    if (!formTitle.trim()) {
+      setFormError('Harap isi judul transaksi.');
+      return;
+    }
+    if (!parsedAmount || parsedAmount <= 0) {
+      setFormError('Nominal transaksi harus lebih besar dari 0.');
+      return;
+    }
 
+    setIsSubmitting(true);
     try {
       if (editingTransaction) {
         await api.patch(`/transactions/${editingTransaction.id}`, {
-          title: formTitle,
+          title: formTitle.trim(),
           amount: parsedAmount,
           type: formType,
           categoryId: formCategoryId,
           paymentMethod: formPaymentMethod,
-          merchant: formMerchant,
+          merchant: formMerchant.trim(),
           transactionDate: formDate,
-          description: formNotes,
+          description: formNotes.trim(),
         });
+        setToast({ type: 'success', message: 'Transaksi berhasil diperbarui!' });
       } else {
         await api.post('/transactions', {
-          title: formTitle,
+          title: formTitle.trim(),
           amount: parsedAmount,
           type: formType,
           categoryId: formCategoryId,
           paymentMethod: formPaymentMethod,
-          merchant: formMerchant,
+          merchant: formMerchant.trim(),
           transactionDate: formDate,
-          description: formNotes,
+          description: formNotes.trim(),
         });
+        setToast({ type: 'success', message: 'Transaksi baru berhasil dicatat!' });
       }
       sound.playSuccess();
       setIsFormOpen(false);
       fetchTransactions();
     } catch (err: any) {
-      alert(err.message || 'Gagal menyimpan transaksi.');
+      setFormError(err.message || 'Gagal menyimpan transaksi.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -167,10 +197,11 @@ export const TransactionsPage: React.FC = () => {
     try {
       await api.delete(`/transactions/${deletingId}`);
       sound.playChirp(400, 0.1);
+      setToast({ type: 'success', message: 'Transaksi berhasil dihapus.' });
       setDeletingId(null);
       fetchTransactions();
     } catch (err: any) {
-      alert(err.message || 'Gagal menghapus transaksi.');
+      setToast({ type: 'error', message: err.message || 'Gagal menghapus transaksi.' });
     }
   };
 
@@ -407,184 +438,222 @@ export const TransactionsPage: React.FC = () => {
       </div>
 
       {/* Add / Edit Modal */}
-      {isFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative transition-colors duration-200">
-            <button
-              onClick={() => setIsFormOpen(false)}
-              className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
-              {editingTransaction ? 'Edit Transaksi' : 'Tambah Transaksi'}
-            </h3>
-
-            {/* Type selector */}
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-4">
+      {isFormOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="relative w-full max-w-lg my-auto max-h-[92vh] flex flex-col bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200">
               <button
-                type="button"
-                onClick={() => setFormType('EXPENSE')}
-                className={`py-2 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
-                  formType === 'EXPENSE'
-                    ? 'bg-rose-500 text-white shadow-md'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                onClick={() => setIsFormOpen(false)}
+                className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
               >
-                <ArrowDownRight className="w-4 h-4" />
-                <span>Pengeluaran</span>
+                <X className="w-5 h-5" />
               </button>
-              <button
-                type="button"
-                onClick={() => setFormType('INCOME')}
-                className={`py-2 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
-                  formType === 'INCOME'
-                    ? 'bg-emerald-500 text-white shadow-md'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <ArrowUpRight className="w-4 h-4" />
-                <span>Pemasukan</span>
-              </button>
-            </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nominal (IDR)</label>
-                <input
-                  type="number"
-                  required
-                  value={formAmount}
-                  onChange={(e) => setFormAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-base focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1 shrink-0">
+                {editingTransaction ? 'Edit Transaksi' : 'Tambah Transaksi'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 shrink-0">
+                Catat mutasi keuangan pemasukan atau pengeluaran secara akurat.
+              </p>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Judul Transaksi</label>
-                <input
-                  type="text"
-                  required
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="Contoh: Belanja Bulanan"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Kategori</label>
-                  <select
-                    value={formCategoryId}
-                    onChange={(e) => setFormCategoryId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                  >
-                    {categories
-                      .filter((c) => c.type === formType)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                  </select>
+              {/* In-Modal Error Notification */}
+              {formError && (
+                <div className="p-3 mb-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fadeIn shrink-0">
+                  <X className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="flex-1 font-medium leading-relaxed">{formError}</span>
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Metode</label>
-                  <select
-                    value={formPaymentMethod}
-                    onChange={(e) => setFormPaymentMethod(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                  >
-                    <option value="Transfer Bank">Transfer Bank</option>
-                    <option value="E-Wallet">E-Wallet</option>
-                    <option value="QRIS">QRIS</option>
-                    <option value="Tunai">Tunai</option>
-                    <option value="Kartu Debit">Kartu Debit</option>
-                    <option value="Kartu Kredit">Kartu Kredit</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Merchant (Opsional)</label>
-                  <input
-                    type="text"
-                    value={formMerchant}
-                    onChange={(e) => setFormMerchant(e.target.value)}
-                    placeholder="Contoh: Tokopedia"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Tanggal</label>
-                  <input
-                    type="date"
-                    required
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Catatan Tambahan (Opsional)</label>
-                <textarea
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Catatan kecil tentang transaksi ini..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div className="pt-2">
+              {/* Type selector */}
+              <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-3 shrink-0">
                 <button
-                  type="submit"
-                  className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all"
+                  type="button"
+                  onClick={() => setFormType('EXPENSE')}
+                  className={`py-2 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                    formType === 'EXPENSE'
+                      ? 'bg-rose-500 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
                 >
-                  {editingTransaction ? 'Simpan Perubahan' : 'Buat Transaksi'}
+                  <ArrowDownRight className="w-4 h-4" />
+                  <span>Pengeluaran</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormType('INCOME')}
+                  className={`py-2 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                    formType === 'INCOME'
+                      ? 'bg-emerald-500 text-white shadow-md'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <ArrowUpRight className="w-4 h-4" />
+                  <span>Pemasukan</span>
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleFormSubmit} className="space-y-3.5 overflow-y-auto pr-1 flex-1">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nominal (IDR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-base focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                  {parseFloat(formAmount) > 0 && (
+                    <p className="text-[11px] font-semibold text-brand-teal dark:text-brand-cyan mt-1">
+                      Terbaca: {formatIDR(parseFloat(formAmount))}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Judul Transaksi</label>
+                  <input
+                    type="text"
+                    required
+                    value={formTitle}
+                    onChange={(e) => setFormTitle(e.target.value)}
+                    placeholder="Contoh: Belanja Bulanan"
+                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Kategori</label>
+                    <select
+                      value={formCategoryId}
+                      onChange={(e) => setFormCategoryId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    >
+                      {categories
+                        .filter((c) => c.type === formType)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Metode</label>
+                    <select
+                      value={formPaymentMethod}
+                      onChange={(e) => setFormPaymentMethod(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    >
+                      <option value="Transfer Bank">Transfer Bank</option>
+                      <option value="E-Wallet">E-Wallet</option>
+                      <option value="QRIS">QRIS</option>
+                      <option value="Tunai">Tunai</option>
+                      <option value="Kartu Debit">Kartu Debit</option>
+                      <option value="Kartu Kredit">Kartu Kredit</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Merchant (Opsional)</label>
+                    <input
+                      type="text"
+                      value={formMerchant}
+                      onChange={(e) => setFormMerchant(e.target.value)}
+                      placeholder="Contoh: Tokopedia"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Tanggal</label>
+                    <input
+                      type="date"
+                      required
+                      value={formDate}
+                      onChange={(e) => setFormDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Catatan Tambahan (Opsional)</label>
+                  <textarea
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Catatan kecil tentang transaksi ini..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                </div>
+
+                <div className="pt-2 sticky bottom-0 bg-white dark:bg-[#151D30] pb-1">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Menyimpan...' : (editingTransaction ? 'Simpan Perubahan' : 'Catat Transaksi')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Delete Confirmation Modal */}
-      {deletingId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-sm bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 text-center shadow-2xl transition-colors duration-200">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-500 flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="w-6 h-6" />
+      {deletingId &&
+        createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto p-4 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-sm my-auto bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 text-center shadow-2xl transition-colors duration-200">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-500 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Hapus Transaksi?</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-6">
+                Transaksi yang dihapus tidak dapat dipulihkan dan akan mempengaruhi perhitungan anggaran.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingId(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors"
+                >
+                  Hapus
+                </button>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Hapus Transaksi?</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-6">
-              Transaksi yang dihapus tidak dapat dipulihkan dan akan mempengaruhi perhitungan anggaran.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeletingId(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors"
-              >
-                Hapus
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
+
+      {/* Floating Toast Notification */}
+      {toast &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[100] max-w-sm px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] animate-bounce-in">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            ) : (
+              <X className="w-5 h-5 text-rose-500 shrink-0" />
+            )}
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>,
+          document.body
+        )}
 
       {/* Receipt Scanner OCR Modal */}
       <ReceiptScannerModal

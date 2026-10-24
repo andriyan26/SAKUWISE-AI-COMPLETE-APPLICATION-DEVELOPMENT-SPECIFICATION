@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
 import { formatDateIndo } from '../../lib/dates.js';
@@ -26,13 +27,27 @@ export const BudgetsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBudget, setEditingBudget] = useState<any>(null);
 
-  // Form
+  // Form State
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // In-App Toast & Confirmation
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const fetchBudgets = async () => {
     setIsLoading(true);
@@ -68,6 +83,7 @@ export const BudgetsPage: React.FC = () => {
     setName('');
     setCategoryId('');
     setAmount('');
+    setFormError(null);
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -81,54 +97,78 @@ export const BudgetsPage: React.FC = () => {
     setEditingBudget(b);
     setName(b.name);
     setCategoryId(b.categoryId || '');
-    setAmount(b.amount.toString());
-    setPeriodStart(b.periodStart.split('T')[0]);
-    setPeriodEnd(b.periodEnd.split('T')[0]);
-    setAlertThreshold(b.alertThreshold.toString());
+    setAmount(b.amount ? b.amount.toString() : '');
+    setFormError(null);
+    setPeriodStart(b.periodStart ? b.periodStart.split('T')[0] : '');
+    setPeriodEnd(b.periodEnd ? b.periodEnd.split('T')[0] : '');
+    setAlertThreshold(b.alertThreshold ? b.alertThreshold.toString() : '80');
     setIsModalOpen(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     const parsedAmount = parseFloat(amount);
-    if (!parsedAmount || parsedAmount <= 0) return;
 
+    if (!name.trim()) {
+      setFormError('Harap masukkan nama anggaran.');
+      return;
+    }
+    if (!parsedAmount || parsedAmount <= 0) {
+      setFormError('Nominal batas anggaran harus lebih besar dari 0.');
+      return;
+    }
+    if (!periodStart || !periodEnd) {
+      setFormError('Harap tentukan tanggal mulai dan tanggal akhir periode.');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
       if (editingBudget) {
         await api.patch(`/budgets/${editingBudget.id}`, {
-          name,
+          name: name.trim(),
           categoryId: categoryId || null,
           amount: parsedAmount,
           periodStart,
           periodEnd,
           alertThreshold: parseInt(alertThreshold, 10),
         });
+        setToast({ type: 'success', message: 'Anggaran berhasil diperbarui!' });
       } else {
         await api.post('/budgets', {
-          name,
+          name: name.trim(),
           categoryId: categoryId || null,
           amount: parsedAmount,
           periodStart,
           periodEnd,
           alertThreshold: parseInt(alertThreshold, 10),
         });
+        setToast({ type: 'success', message: 'Anggaran baru berhasil dibuat!' });
       }
       sound.playSuccess();
       setIsModalOpen(false);
       fetchBudgets();
     } catch (err: any) {
-      alert(err.message || 'Gagal menyimpan anggaran.');
+      setFormError(err.message || 'Gagal menyimpan anggaran.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Yakin ingin menghapus anggaran ini?')) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await api.delete(`/budgets/${id}`);
+      await api.delete(`/budgets/${deleteTarget.id}`);
       sound.playChirp(400, 0.1);
+      setToast({ type: 'success', message: `Anggaran "${deleteTarget.name}" berhasil dihapus.` });
+      setDeleteTarget(null);
       fetchBudgets();
     } catch (err: any) {
-      alert(err.message || 'Gagal menghapus.');
+      setToast({ type: 'error', message: err.message || 'Gagal menghapus anggaran.' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -237,12 +277,14 @@ export const BudgetsPage: React.FC = () => {
                     <button
                       onClick={() => openEditModal(b)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-brand-violet dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      title="Edit Anggaran"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleDelete(b.id)}
+                      onClick={() => setDeleteTarget(b)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+                      title="Hapus Anggaran"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -294,112 +336,181 @@ export const BudgetsPage: React.FC = () => {
       </div>
 
       {/* Create / Edit Budget Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative transition-colors duration-200">
-            <button
-              onClick={() => setIsModalOpen(false)}
-              className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      {isModalOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="relative w-full max-w-md my-auto max-h-[92vh] flex flex-col bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
-              {editingBudget ? 'Edit Anggaran' : 'Buat Anggaran Baru'}
-            </h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 shrink-0">
+                {editingBudget ? 'Edit Anggaran' : 'Buat Anggaran Baru'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 shrink-0">
+                Atur pagu belanja agar keuanganmu tetap stabil dan terkontrol.
+              </p>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Anggaran</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Contoh: Anggaran Kuliner Bulanan"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
+              {/* In-Modal Error Notification */}
+              {formError && (
+                <div className="p-3.5 mb-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2.5 animate-fadeIn shrink-0">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="flex-1 font-medium leading-relaxed">{formError}</span>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Kategori (Opsional)</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
-                >
-                  <option value="">Semua Kategori (Batas Belanja Keseluruhan)</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Batas Maksimal (IDR)</label>
-                <input
-                  type="number"
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:border-brand-violet transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-1 flex-1">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Mulai Periode</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Nama Anggaran</label>
                   <input
-                    type="date"
+                    type="text"
                     required
-                    value={periodStart}
-                    onChange={(e) => setPeriodStart(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Contoh: Anggaran Belanja Bulanan"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Akhir Periode</label>
-                  <input
-                    type="date"
-                    required
-                    value={periodEnd}
-                    onChange={(e) => setPeriodEnd(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                  />
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Kategori (Opsional)</label>
+                  <select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  >
+                    <option value="">Semua Kategori (Batas Belanja Keseluruhan)</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Ambang Notifikasi Peringatan ({alertThreshold}%)
-                </label>
-                <select
-                  value={alertThreshold}
-                  onChange={(e) => setAlertThreshold(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
-                >
-                  <option value="75">75% - Peringatan Awal</option>
-                  <option value="80">80% - Standar Rekomendasi</option>
-                  <option value="90">90% - Pengeluaran Tinggi</option>
-                  <option value="100">100% - Batas Maksimal</option>
-                </select>
-              </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Batas Maksimal (IDR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:border-brand-violet transition-all"
+                  />
+                  {parseFloat(amount) > 0 && (
+                    <p className="text-[11px] font-semibold text-brand-teal dark:text-brand-cyan mt-1">
+                      Terbaca: {formatIDR(parseFloat(amount))}
+                    </p>
+                  )}
+                </div>
 
-              <div className="pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Mulai Periode</label>
+                    <input
+                      type="date"
+                      required
+                      value={periodStart}
+                      onChange={(e) => setPeriodStart(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Akhir Periode</label>
+                    <input
+                      type="date"
+                      required
+                      value={periodEnd}
+                      onChange={(e) => setPeriodEnd(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Ambang Notifikasi Peringatan ({alertThreshold}%)
+                  </label>
+                  <select
+                    value={alertThreshold}
+                    onChange={(e) => setAlertThreshold(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-violet transition-all"
+                  >
+                    <option value="75">75% - Peringatan Dini</option>
+                    <option value="80">80% - Standar Rekomendasi</option>
+                    <option value="90">90% - Pengeluaran Tinggi</option>
+                    <option value="100">100% - Batas Maksimal</option>
+                  </select>
+                </div>
+
+                <div className="pt-2 sticky bottom-0 bg-white dark:bg-[#151D30] pb-1">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Menyimpan...' : (editingBudget ? 'Simpan Perubahan' : 'Buat Anggaran')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Custom Confirmation Modal for Delete */}
+      {deleteTarget &&
+        createPortal(
+          <div className="fixed inset-0 z-50 p-4 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-sm bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 shadow-2xl text-center">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Hapus Anggaran?</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                Yakin ingin menghapus anggaran <strong className="text-slate-800 dark:text-slate-200">"{deleteTarget.name}"</strong>? Data transaksi Anda tetap aman.
+              </p>
+              <div className="flex items-center gap-2 mt-5">
                 <button
-                  type="submit"
-                  className="w-full py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                 >
-                  {editingBudget ? 'Simpan Perubahan' : 'Buat Anggaran'}
+                  Batal
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Floating Toast Notification */}
+      {toast &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[100] max-w-sm px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] animate-bounce-in">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
+            )}
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

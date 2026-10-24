@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
 import { sound } from '../../lib/sound.js';
@@ -140,9 +141,9 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
   };
 
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-lg bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto transition-colors duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4 sm:p-6 flex items-center justify-center bg-black/75 backdrop-blur-md animate-fadeIn">
+      <div className="w-full max-w-lg my-auto bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl relative max-h-[92vh] overflow-y-auto transition-colors duration-200">
         <button
           onClick={onClose}
           className="absolute top-5 right-5 p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -309,6 +310,7 @@ export const ReceiptScannerModal: React.FC<ReceiptScannerModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

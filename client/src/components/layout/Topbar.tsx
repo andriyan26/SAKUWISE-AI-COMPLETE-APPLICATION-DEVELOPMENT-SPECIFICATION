@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext.js';
 import { useTheme } from '../../contexts/ThemeContext.js';
 import { api } from '../../lib/api-client.js';
 import { formatRelativeTime } from '../../lib/dates.js';
+import { getSafeAvatarUrl, handleAvatarError } from '../../lib/avatar.js';
 import {
   Menu,
   Search,
@@ -215,8 +216,9 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
           >
             <div className="relative">
               <img
-                src={user?.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.name || 'Andrian'}`}
-                alt="Avatar"
+                src={getSafeAvatarUrl(user?.avatarUrl, user?.name)}
+                alt={user?.name || 'Avatar'}
+                onError={(e) => handleAvatarError(e, user?.name)}
                 className="w-8 h-8 rounded-lg object-cover border border-brand-violet/50 shadow-sm"
               />
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-white dark:border-[#0F172A] rounded-full" />
@@ -237,8 +239,9 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
               <div className="p-3 rounded-xl bg-gradient-to-br from-brand-violet/10 via-brand-teal/5 to-transparent border border-brand-violet/20 mb-2">
                 <div className="flex items-center gap-3">
                   <img
-                    src={user?.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.name || 'Andrian'}`}
-                    alt="Avatar"
+                    src={getSafeAvatarUrl(user?.avatarUrl, user?.name)}
+                    alt={user?.name || 'Avatar'}
+                    onError={(e) => handleAvatarError(e, user?.name)}
                     className="w-10 h-10 rounded-xl object-cover border-2 border-brand-violet/60 shadow-md"
                   />
                   <div className="truncate">

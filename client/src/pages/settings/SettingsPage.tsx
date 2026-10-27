@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext.js';
 import { useTheme } from '../../contexts/ThemeContext.js';
 import { api } from '../../lib/api-client.js';
 import { sound } from '../../lib/sound.js';
+import { getSafeAvatarUrl, handleAvatarError } from '../../lib/avatar.js';
 import {
   User as UserIcon,
   Sliders,
@@ -43,7 +44,7 @@ const PRESET_AVATARS = [
 ];
 
 export const SettingsPage: React.FC = () => {
-  const { user, updateUser, logout } = useAuth();
+  const { user, updateUser, logout, refreshUser } = useAuth();
   const { theme, toggleTheme, setTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -55,6 +56,15 @@ export const SettingsPage: React.FC = () => {
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state whenever user loads or updates
+  useEffect(() => {
+    if (user) {
+      if (user.name) setName(user.name);
+      if (user.currency) setCurrency(user.currency);
+      if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
+    }
+  }, [user]);
 
   // Password Form
   const [currentPassword, setCurrentPassword] = useState('');
@@ -106,6 +116,7 @@ export const SettingsPage: React.FC = () => {
         sound.playSuccess();
         setAvatarUrl(res.avatarUrl);
         updateUser({ avatarUrl: res.avatarUrl });
+        if (refreshUser) refreshUser();
         setToast({ type: 'success', message: 'Foto profil berhasil diunggah dan disimpan!' });
       } else {
         setToast({ type: 'error', message: res.message || 'Gagal mengunggah foto.' });
@@ -131,6 +142,7 @@ export const SettingsPage: React.FC = () => {
       if (res.success) {
         sound.playSuccess();
         updateUser({ name, currency, avatarUrl });
+        if (refreshUser) refreshUser();
         setToast({ type: 'success', message: 'Profil berhasil diperbarui dengan sempurna!' });
       }
     } catch (err: any) {
@@ -257,8 +269,9 @@ export const SettingsPage: React.FC = () => {
                   {/* Avatar with Camera Overlay */}
                   <div className="relative group shrink-0 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                     <img
-                      src={avatarUrl || user?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-                      alt="Avatar"
+                      src={getSafeAvatarUrl(avatarUrl || user?.avatarUrl, name || user?.name)}
+                      alt={name || user?.name || 'Avatar'}
+                      onError={(e) => handleAvatarError(e, name || user?.name)}
                       className="w-20 h-20 rounded-2xl object-cover border-2 border-brand-violet shadow-lg transition-transform group-hover:scale-105"
                     />
                     {/* Hover Upload Overlay */}

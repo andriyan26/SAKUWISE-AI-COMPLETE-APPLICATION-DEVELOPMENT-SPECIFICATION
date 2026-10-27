@@ -457,7 +457,7 @@ CREATE TABLE `users` (
   `name` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `email` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `avatar_url` varchar(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `avatar_url` mediumtext COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `currency` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'IDR',
   `timezone` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Asia/Jakarta',
   `theme_preference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'dark',

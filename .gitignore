@@ -38,6 +38,8 @@ pnpm-debug.log*
 # Temporary uploads (keep structure, ignore uploaded files)
 server/uploads/*
 !server/uploads/.gitkeep
+client/public/uploads/*/*
+!client/public/uploads/**/.gitkeep
 
 # Large Media
 *.mp4

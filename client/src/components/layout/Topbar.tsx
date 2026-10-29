@@ -5,6 +5,8 @@ import { useTheme } from '../../contexts/ThemeContext.js';
 import { api } from '../../lib/api-client.js';
 import { formatRelativeTime } from '../../lib/dates.js';
 import { getSafeAvatarUrl, handleAvatarError } from '../../lib/avatar.js';
+import { voiceService } from '../../lib/voice-service.js';
+import { sound } from '../../lib/sound.js';
 import {
   Menu,
   Search,
@@ -21,6 +23,8 @@ import {
   Sparkles,
   CreditCard,
   ChevronDown,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 
 interface TopbarProps {
@@ -35,6 +39,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
+  const [isVoiceSearch, setIsVoiceSearch] = useState(false);
 
   // Dropdown states
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -76,6 +81,34 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleVoiceSearch = () => {
+    if (isVoiceSearch) {
+      voiceService.stopListening();
+      setIsVoiceSearch(false);
+      return;
+    }
+
+    sound.playChirp(700, 0.08);
+    setIsVoiceSearch(true);
+
+    voiceService.startListening({
+      lang: 'id-ID',
+      continuous: false,
+      interimResults: true,
+      onStart: () => setIsVoiceSearch(true),
+      onResult: (text, isFinal) => {
+        setSearchQuery(text);
+        if (isFinal) {
+          setIsVoiceSearch(false);
+          sound.playSuccess();
+          navigate(`/transactions?search=${encodeURIComponent(text.trim())}`);
+        }
+      },
+      onError: () => setIsVoiceSearch(false),
+      onEnd: () => setIsVoiceSearch(false),
+    });
+  };
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
@@ -116,8 +149,20 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Cari transaksi, merchant, atau kategori..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 text-slate-900 dark:text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:border-brand-violet focus:ring-1 focus:ring-brand-violet transition-all"
+            className="w-full pl-10 pr-10 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 text-slate-900 dark:text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:border-brand-violet focus:ring-1 focus:ring-brand-violet transition-all"
           />
+          <button
+            type="button"
+            onClick={handleVoiceSearch}
+            title={isVoiceSearch ? "Sedang mendengarkan... Klik untuk berhenti" : "Cari dengan Suara"}
+            className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all ${
+              isVoiceSearch
+                ? "text-rose-500 bg-rose-500/10 animate-pulse"
+                : "text-slate-400 hover:text-brand-violet hover:bg-slate-200 dark:hover:bg-slate-700/60"
+            }`}
+          >
+            {isVoiceSearch ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
         </form>
       </div>
 

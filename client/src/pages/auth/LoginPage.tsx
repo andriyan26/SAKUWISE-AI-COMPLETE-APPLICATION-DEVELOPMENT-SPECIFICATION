@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { SakuMascot3D, MascotState } from '../../components/auth/SakuMascot3D.js';
@@ -46,76 +46,128 @@ export const LoginPage: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Preload Neural Indonesian voice phrases while the holographic preloader runs
+  useEffect(() => {
+    sound.preloadPhrases([
+      'Halo! Selamat datang di SAKUWISE AI.',
+      'Halo! Selamat datang di SAKUWISE AI. Silakan masuk ke akunmu ya.',
+      'Aku asisten pintar keuanganmu, senang banget bisa bertemu kamu.',
+      'Sebentar ya, aku ambilkan formulir masuknya dulu.',
+      'Hop, ayo kita tarik perlahan ke tengah.',
+      'Nah, sudah siap. Silakan masuk ke akunmu ya.',
+      'Silakan ketik email kamu ya.',
+      'Tenang, aku tutup mata, nggak bakal ngintip kok.',
+      'Wah, kata sandinya terlihat.',
+      'Mata tertutup lagi, aman.',
+      'Memverifikasi akun kamu, tunggu sebentar ya.',
+      'Hore, berhasil masuk! Selamat datang kembali.',
+    ]);
+
+    return () => {
+      sound.stopSpeaking();
+    };
+  }, []);
+
   // Mouse tracking for mascot eye gaze
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-  // Quick skip for desktop animation
+  // Active animation timers ref so we can cancel them cleanly on skip, input focus, or unmount
+  const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearAnimationTimers = () => {
+    animTimersRef.current.forEach((timer) => clearTimeout(timer));
+    animTimersRef.current = [];
+  };
+
+  // Quick skip for desktop animation (guaranteed no voice overlap)
   const skipAnimation = () => {
+    clearAnimationTimers();
+    sound.stopSpeaking();
     setAnimPhase(6);
     setMascotState('idle');
     setSpeechText('');
   };
 
   // Story Animation Sequence:
-  // Phase 1 (0s - 2.0s): Mascot enters on the LEFT (muncul awal di sebelah kiri)
-  // Phase 2 (2.0s - 4.8s): Mascot waves & says hello on the LEFT (say hello!)
-  // Phase 3 (4.8s - 8.0s): Mascot walks SLOWLY to the bottom-right (jalan perlahan ke kanan bawah mengambil form)
-  // Phase 4 (8.0s - 11.6s): Mascot pulls the form SLOWLY to the center (tarik perlahan ke tengah)
-  // Phase 5 (11.6s - 15.0s): Form locked in CENTER, Mascot docks at POSISI KIRI SAMPING FORM!
-  // Phase 6 (15.0s+): Permanent interactive idle state on the LEFT
+  // Phase 1 (0s - 2.4s): Mascot enters on the LEFT (muncul awal di sebelah kiri)
+  // Phase 2 (2.4s - 5.4s): Mascot waves & says hello on the LEFT (say hello!)
+  // Phase 3 (5.4s - 8.6s): Mascot walks SLOWLY to the bottom-right (jalan perlahan ke kanan bawah mengambil form)
+  // Phase 4 (8.6s - 12.2s): Mascot pulls the form SLOWLY to the center (tarik perlahan ke tengah)
+  // Phase 5 (12.2s - 16.0s): Form locked in CENTER, Mascot docks at POSISI KIRI SAMPING FORM!
+  // Phase 6 (16.0s+): Permanent interactive idle state on the LEFT
   const [animPhase, setAnimPhase] = useState<number>(0);
   const [mascotState, setMascotState] = useState<MascotState>('walking_in');
-  const [speechText, setSpeechText] = useState<string>('Halo teman-teman! Selamat datang di SAKUWISE AI! 👋');
+  const [speechText, setSpeechText] = useState<string>('Halo! Selamat datang di SAKUWISE AI! 👋');
 
-  // Run the story choreography with cute animated character voice & cartoon effects
+  // Run the story choreography with natural Indonesian voice & subtle sound effects
   const runAnimationSequence = () => {
+    clearAnimationTimers();
+    sound.stopSpeaking();
+
+    // Mobile layout has the login card already centered, so greet warmly without pulling narration
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setAnimPhase(5);
+      setMascotState('greeting');
+      setSpeechText('Halo! Selamat datang di SAKUWISE AI! Silakan masuk ke akunmu ya 👋');
+      sound.playCartoonGreeting();
+      sound.speak('Halo! Selamat datang di SAKUWISE AI. Silakan masuk ke akunmu ya.');
+
+      const tm = setTimeout(() => {
+        setAnimPhase(6);
+        setMascotState('idle');
+        setSpeechText('');
+      }, 5000);
+      animTimersRef.current = [tm];
+      return () => clearAnimationTimers();
+    }
+
     // 0s: Reset off-screen left
     setAnimPhase(0);
     setMascotState('walking_in');
-    setSpeechText('Halo teman-teman! Selamat datang di SAKUWISE AI! 👋');
+    setSpeechText('Halo! Selamat datang di SAKUWISE AI! 👋');
 
     // 0.2s: Phase 1 - Walk in from left
     const t0 = setTimeout(() => {
       setAnimPhase(1);
       sound.playCartoonGreeting();
-      sound.speak('Halo teman-teman! Selamat datang di SAKUWISE AI!');
+      sound.speak('Halo! Selamat datang di SAKUWISE AI.');
     }, 200);
 
-    // 2.2s: Phase 2 - Welcome message on the left!
+    // 2.6s: Phase 2 - Welcome message on the left!
     const t1 = setTimeout(() => {
       setAnimPhase(2);
       setMascotState('greeting');
       setSpeechText('Aku asisten pintar keuanganmu, senang banget bisa bertemu kamu! ✨');
       sound.playCartoonChime();
-      sound.speak('Aku asisten pintar keuanganmu, senang banget bisa bertemu kamu!');
-    }, 2200);
+      sound.speak('Aku asisten pintar keuanganmu, senang banget bisa bertemu kamu.');
+    }, 2600);
 
-    // 4.6s: Phase 3 - Announce before pulling: "Sebentar yaa, aku tarik..."
+    // 5.8s: Phase 3 - Announce before pulling
     const t2 = setTimeout(() => {
       setAnimPhase(3);
       setMascotState('walking_in');
-      setSpeechText('Sebentar yaa, aku tarik formulirnya dulu! 🏃‍♂️💨');
+      setSpeechText('Sebentar ya, aku ambilkan formulir masuknya dulu! 🏃‍♂️💨');
       sound.playCartoonBoing();
       sound.playWoosh();
-      sound.speak('Sebentar yaa, aku tarik formulirnya dulu!');
-    }, 4600);
+      sound.speak('Sebentar ya, aku ambilkan formulir masuknya dulu.');
+    }, 5800);
 
-    // 8.0s: Phase 4 - Pulling slowly to center:
+    // 9.0s: Phase 4 - Pulling slowly to center
     const t3 = setTimeout(() => {
       setAnimPhase(4);
       setMascotState('pulling');
-      setSpeechText('Heei-yaaa! Tarik perlahan ke tengah... 🦾✨');
+      setSpeechText('Hop, ayo kita tarik perlahan ke tengah... 🦾✨');
       sound.playCartoonEffort();
-      sound.speak('Heei-yaaa! Tarik perlahan ke tengah!');
-    }, 8000);
+      sound.speak('Hop, ayo kita tarik perlahan ke tengah.');
+    }, 9000);
 
-    // 11.6s: Phase 5 - Pulled & locked in center! "Sudah saya tarik ya, silakan login!"
+    // 12.6s: Phase 5 - Pulled & locked in center!
     const t4 = setTimeout(() => {
       setAnimPhase(5);
       setMascotState('presenting');
-      setSpeechText('Sudah saya tarik ya, silakan login! 🚀');
+      setSpeechText('Nah, sudah siap! Silakan masuk ke akunmu ya 🚀');
       sound.playCartoonTada();
-      sound.speak('Sudah saya tarik ya, silakan login!');
+      sound.speak('Nah, sudah siap. Silakan masuk ke akunmu ya.');
 
       confetti({
         particleCount: 50,
@@ -123,22 +175,19 @@ export const LoginPage: React.FC = () => {
         origin: { x: 0.5, y: 0.5 },
         colors: ['#635BFF', '#14B8A6', '#38BDF8'],
       });
-    }, 11600);
+    }, 12600);
 
-    // 16.0s: Phase 6 - Permanent interactive idle mode on the LEFT
+    // 16.5s: Phase 6 - Permanent interactive idle mode on the LEFT
     const t5 = setTimeout(() => {
       setAnimPhase(6);
       setMascotState('idle');
       setSpeechText('');
-    }, 16000);
+    }, 16500);
+
+    animTimersRef.current = [t0, t1, t2, t3, t4, t5];
 
     return () => {
-      clearTimeout(t0);
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-      clearTimeout(t5);
+      clearAnimationTimers();
     };
   };
 
@@ -161,6 +210,7 @@ export const LoginPage: React.FC = () => {
 
     return () => {
       if (cleanupAnim) cleanupAnim();
+      sound.stopSpeaking();
       window.removeEventListener('click', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
       window.removeEventListener('touchstart', handleFirstGesture);
@@ -182,78 +232,84 @@ export const LoginPage: React.FC = () => {
     setIsMuted(muted);
   };
 
-  // Handle Input Focus Reactions with animated cartoon character voice
+  // Handle Input Focus Reactions with natural Indonesian voice
   const handleEmailFocus = () => {
-    if (animPhase >= 5) {
+    if (animPhase >= 4 || isMobile) {
+      clearAnimationTimers();
+      setAnimPhase(6);
       setMascotState('idle');
       setSpeechText('Silakan ketik email kamu ya! 📧');
       sound.playCartoonPop();
-      sound.speak('Silakan ketik email kamu ya!');
+      sound.speak('Silakan ketik email kamu ya.');
     }
   };
 
   const handlePasswordFocus = () => {
-    if (animPhase >= 5) {
+    if (animPhase >= 4 || isMobile) {
+      clearAnimationTimers();
+      setAnimPhase(6);
       if (showPassword) {
         setMascotState('peeking');
-        setSpeechText('Wah, passwordnya terlihat! 👀');
-        sound.speak('Wah, passwordnya terlihat!');
+        setSpeechText('Wah, kata sandinya terlihat! 👀');
+        sound.speak('Wah, kata sandinya terlihat.');
       } else {
         setMascotState('covering_eyes');
         setSpeechText('Tenang, aku tutup mata, nggak bakal ngintip kok! 🙈🔒');
-        sound.speak('Tenang, aku tutup mata, nggak bakal ngintip kok!');
+        sound.speak('Tenang, aku tutup mata, nggak bakal ngintip kok.');
       }
       sound.playPeek();
     }
   };
 
   const handleInputBlur = () => {
-    if (animPhase >= 5) {
+    if (animPhase >= 5 || isMobile) {
       setMascotState('idle');
       setSpeechText('');
     }
   };
 
   const handleTogglePassword = () => {
+    clearAnimationTimers();
     const nextShow = !showPassword;
     setShowPassword(nextShow);
     sound.playPeek();
     if (nextShow) {
       setMascotState('peeking');
-      setSpeechText('Wah, passwordnya terlihat! 👀');
-      sound.speak('Wah, passwordnya terlihat!');
+      setSpeechText('Wah, kata sandinya terlihat! 👀');
+      sound.speak('Wah, kata sandinya terlihat.');
     } else {
       setMascotState('covering_eyes');
       setSpeechText('Mata tertutup lagi, aman! 🙈');
-      sound.speak('Mata tertutup lagi, aman!');
+      sound.speak('Mata tertutup lagi, aman.');
     }
   };
 
   // Handle Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    clearAnimationTimers();
     setErrorMessage('');
 
     if (!email || !password) {
       setErrorMessage('Harap isi email dan kata sandi Anda.');
       setMascotState('error');
-      setSpeechText('Ups, email dan passwordnya wajib diisi dulu ya! ⚠️');
-      sound.speak('Ups, email dan passwordnya wajib diisi dulu ya!');
+      setSpeechText('Ups, email dan kata sandinya wajib diisi dulu ya! ⚠️');
+      sound.speak('Ups, email dan kata sandinya wajib diisi dulu ya.');
       return;
     }
 
     setIsLoading(true);
     setMascotState('typing');
     setSpeechText('Memverifikasi akun kamu, tunggu sebentar ya... 🔐');
-    sound.speak('Memverifikasi akun kamu, tunggu sebentar ya!');
+    sound.speak('Memverifikasi akun kamu, tunggu sebentar ya.');
 
     try {
       await login(email, password);
 
       sound.playCartoonTada();
       setMascotState('celebrating');
-      setSpeechText('Yeeeay, berhasil masuk! Selamat datang kembali! 🎉');
-      sound.speak('Yeeeay, berhasil masuk! Selamat datang kembali!');
+      setSpeechText('Hore, berhasil masuk! Selamat datang kembali! 🎉');
+      sound.speak('Hore, berhasil masuk! Selamat datang kembali.');
 
       confetti({
         particleCount: 90,
@@ -268,8 +324,8 @@ export const LoginPage: React.FC = () => {
     } catch (err: any) {
       setErrorMessage(err.message || 'Gagal masuk. Periksa email atau kata sandi Anda.');
       setMascotState('error');
-      setSpeechText('Ups, email atau passwordnya salah nih, coba dicek lagi ya! 🥺');
-      sound.speak('Ups, email atau passwordnya salah nih, coba dicek lagi ya!');
+      setSpeechText('Ups, email atau kata sandinya belum tepat nih, coba dicek lagi ya! 🥺');
+      sound.speak('Ups, email atau kata sandinya belum tepat nih, coba dicek lagi ya.');
       sound.playChirp(300, 0.2);
     } finally {
       setIsLoading(false);

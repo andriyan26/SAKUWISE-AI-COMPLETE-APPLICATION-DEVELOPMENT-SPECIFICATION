@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { api, downloadFile } from '../../lib/api-client.js';
 import { formatIDR } from '../../lib/currency.js';
 import { formatDateIndo } from '../../lib/dates.js';
+import { sound } from '../../lib/sound.js';
+import { voiceService } from '../../lib/voice-service.js';
 import {
   Printer,
   Download,
@@ -19,6 +21,10 @@ import {
   PlusCircle,
   Target,
   X,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -44,12 +50,119 @@ export const ReportsPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Voice Assistant state for Reports
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [isSpeakingSummary, setIsSpeakingSummary] = useState(false);
+
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => setToast(null), 3500);
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  // Ensure any active voice playback or recognition stops when leaving ReportsPage
+  useEffect(() => {
+    return () => {
+      sound.stopSpeaking();
+      voiceService.stopListening();
+    };
+  }, []);
+
+  const handleVoiceReportCommand = (transcript: string) => {
+    const lower = transcript.toLowerCase();
+    sound.playChirp(700, 0.08);
+
+    if (lower.includes('kategori')) {
+      setReportType('category_breakdown');
+      setToast({ type: 'success', message: 'Beralih ke tab: Analisis Kategori' });
+      sound.speak('Menampilkan analisis kategori');
+    } else if (lower.includes('anggaran') || lower.includes('budget')) {
+      setReportType('budget_performance');
+      setToast({ type: 'success', message: 'Beralih ke tab: Kinerja Anggaran' });
+      sound.speak('Menampilkan evaluasi kinerja anggaran');
+    } else if (lower.includes('ringkasan') || lower.includes('bulanan')) {
+      setReportType('monthly_summary');
+      setToast({ type: 'success', message: 'Beralih ke tab: Ringkasan Bulanan' });
+      sound.speak('Menampilkan ringkasan bulanan');
+    } else if (lower.includes('cetak') || lower.includes('print') || lower.includes('pdf')) {
+      setToast({ type: 'success', message: 'Membuka dialog cetak PDF' });
+      sound.speak('Membuka dokumen cetak PDF');
+      setTimeout(() => handlePrint(), 500);
+    } else if (lower.includes('ekspor') || lower.includes('csv') || lower.includes('download')) {
+      setToast({ type: 'success', message: 'Mengunduh laporan CSV' });
+      sound.speak('Mengunduh berkas CSV');
+      handleExportCsv();
+    } else if (lower.includes('baca') || lower.includes('suara') || lower.includes('jelaskan') || lower.includes('kondisi')) {
+      readReportSummaryAloud();
+    } else {
+      setToast({
+        type: 'error',
+        message: `Perintah "${transcript}" tidak dikenali. Coba: "Ringkasan bulanan", "Analisis kategori", atau "Cetak laporan".`,
+      });
+    }
+  };
+
+  const startVoiceCommand = () => {
+    setVoiceTranscript('');
+    setIsVoiceListening(true);
+    sound.playChirp(800, 0.08);
+
+    voiceService.startListening({
+      lang: 'id-ID',
+      continuous: false,
+      interimResults: true,
+      onStart: () => setIsVoiceListening(true),
+      onResult: (text, isFinal) => {
+        setVoiceTranscript(text);
+        if (isFinal) {
+          setIsVoiceListening(false);
+          setIsVoiceOpen(false);
+          handleVoiceReportCommand(text);
+        }
+      },
+      onError: (err) => {
+        setIsVoiceListening(false);
+        setToast({ type: 'error', message: err });
+      },
+      onEnd: () => setIsVoiceListening(false),
+    });
+  };
+
+  const stopVoiceCommand = () => {
+    voiceService.stopListening();
+    setIsVoiceListening(false);
+  };
+
+  const readReportSummaryAloud = () => {
+    if (isSpeakingSummary) {
+      sound.stopSpeaking();
+      setIsSpeakingSummary(false);
+      return;
+    }
+
+    if (!reportData?.summary) {
+      sound.speak('Belum ada data laporan yang tersedia saat ini.');
+      return;
+    }
+
+    const s = reportData.summary;
+    setIsSpeakingSummary(true);
+    const speechText = `Berikut ringkasan performa finansialmu. Total pemasukan sebesar ${formatIDR(
+      s.totalIncome || 0
+    )}, total pengeluaran sebesar ${formatIDR(
+      s.totalExpense || 0
+    )}, dan sisa kas bersih ${formatIDR(
+      s.netCashFlow || 0
+    )}, dengan rasio tabungan ${s.savingsRate || 0} persen.`;
+
+    sound.speak(speechText, {
+      onEnd: () => setIsSpeakingSummary(false),
+      onError: () => setIsSpeakingSummary(false),
+    });
+  };
 
   const fetchReport = async () => {
     setIsLoading(true);
@@ -110,6 +223,32 @@ export const ReportsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* Read Aloud Button */}
+          <button
+            onClick={readReportSummaryAloud}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+              isSpeakingSummary
+                ? 'bg-brand-violet text-white border-brand-violet shadow-glow-violet animate-pulse'
+                : 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-brand-violet dark:text-brand-cyan border-slate-200 dark:border-brand-violet/30'
+            }`}
+            title="Dengarkan Ringkasan Laporan dengan Suara AI"
+          >
+            {isSpeakingSummary ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            <span>{isSpeakingSummary ? 'Hentikan Suara' : 'Bacakan Ringkasan'}</span>
+          </button>
+
+          {/* Voice Assistant Command Button */}
+          <button
+            onClick={() => {
+              setIsVoiceOpen(true);
+              startVoiceCommand();
+            }}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-brand-violet dark:text-brand-cyan border border-slate-200 dark:border-brand-violet/30 shadow-sm transition-all flex items-center gap-1.5 group"
+          >
+            <Mic className="w-4 h-4 text-brand-violet dark:text-brand-cyan group-hover:scale-110 transition-transform" />
+            <span>Perintah Suara AI</span>
+          </button>
+
           <button
             onClick={handleExportCsv}
             disabled={isExporting}
@@ -118,6 +257,7 @@ export const ReportsPage: React.FC = () => {
             {isExporting ? <RefreshCw className="w-4 h-4 animate-spin text-brand-teal" /> : <Download className="w-4 h-4" />}
             <span>{isExporting ? 'Mengunduh...' : 'Ekspor CSV'}</span>
           </button>
+
           <button
             onClick={handlePrint}
             className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-brand-violet to-brand-teal text-white shadow-glow-violet hover:opacity-95 transition-all flex items-center gap-1.5"
@@ -483,6 +623,100 @@ export const ReportsPage: React.FC = () => {
             <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
               <X className="w-4 h-4" />
             </button>
+          </div>,
+          document.body
+        )}
+
+      {/* Voice Assistant Command Modal for Reports */}
+      {isVoiceOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 p-4 sm:p-6 flex items-center justify-center bg-black/80 backdrop-blur-md animate-fadeIn select-none">
+            <div className="relative w-full max-w-md my-auto bg-white dark:bg-[#151D30] border border-slate-200 dark:border-[#293449] rounded-3xl p-6 sm:p-8 shadow-2xl text-center">
+              <button
+                onClick={() => {
+                  stopVoiceCommand();
+                  setIsVoiceOpen(false);
+                }}
+                className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-brand-violet to-brand-teal flex items-center justify-center text-white mx-auto mb-4 shadow-glow-violet animate-pulse ring-4 ring-brand-violet/20">
+                <Mic className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Asisten Suara Laporan Keuangan
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
+                {isVoiceListening
+                  ? 'Mendengarkan suaramu... Ucapkan perintah di bawah:'
+                  : 'Ketuk mikrofon atau pilih perintah di bawah:'}
+              </p>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 min-h-[56px] text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center justify-center mb-4">
+                {voiceTranscript ? (
+                  <span>"{voiceTranscript}"</span>
+                ) : (
+                  <span className="text-slate-400 italic">
+                    {isVoiceListening ? 'Bicara sekarang...' : 'Belum ada suara terdeteksi'}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1.5 text-left mb-5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Perintah yang dapat diucapkan:
+                </span>
+                {[
+                  'Tampilkan ringkasan bulanan',
+                  'Tampilkan analisis kategori',
+                  'Tampilkan kinerja anggaran',
+                  'Cetak laporan PDF',
+                  'Ekspor file CSV',
+                  'Bacakan ringkasan laporan',
+                ].map((cmd, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      stopVoiceCommand();
+                      setIsVoiceOpen(false);
+                      handleVoiceReportCommand(cmd);
+                    }}
+                    className="w-full text-left px-3 py-1.5 rounded-xl text-xs bg-slate-100 dark:bg-slate-800/60 hover:bg-brand-violet/10 hover:text-brand-violet dark:hover:text-brand-cyan transition-all border border-transparent hover:border-brand-violet/30"
+                  >
+                    👉 "{cmd}"
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    stopVoiceCommand();
+                    setIsVoiceOpen(false);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Tutup
+                </button>
+                <button
+                  onClick={() => {
+                    if (isVoiceListening) {
+                      stopVoiceCommand();
+                    } else {
+                      startVoiceCommand();
+                    }
+                  }}
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-bold text-white shadow-md transition-all ${
+                    isVoiceListening ? 'bg-rose-500 hover:bg-rose-600' : 'bg-brand-violet hover:bg-brand-violet/90'
+                  }`}
+                >
+                  {isVoiceListening ? 'Berhenti Merekam' : 'Mulai Bicara'}
+                </button>
+              </div>
+            </div>
           </div>,
           document.body
         )}

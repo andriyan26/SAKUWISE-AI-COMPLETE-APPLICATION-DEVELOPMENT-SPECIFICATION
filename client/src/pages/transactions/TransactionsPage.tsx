@@ -5,6 +5,8 @@ import { formatIDR } from '../../lib/currency.js';
 import { formatDateIndo } from '../../lib/dates.js';
 import { sound } from '../../lib/sound.js';
 import { ReceiptScannerModal } from '../../components/transactions/ReceiptScannerModal.js';
+import { VoiceNoteModal } from '../../components/common/VoiceNoteModal.js';
+import { ParsedVoiceTransaction } from '../../lib/voice-parser.js';
 import {
   Search,
   Plus,
@@ -19,6 +21,7 @@ import {
   X,
   Sparkles,
   CheckCircle2,
+  Mic,
 } from 'lucide-react';
 
 export const TransactionsPage: React.FC = () => {
@@ -39,8 +42,10 @@ export const TransactionsPage: React.FC = () => {
   // Modals
   const [isScanOpen, setIsScanOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [voiceSuccessMsg, setVoiceSuccessMsg] = useState<string | null>(null);
 
   // Form State
   const [formTitle, setFormTitle] = useState('');
@@ -119,6 +124,7 @@ export const TransactionsPage: React.FC = () => {
     setFormAmount('');
     setFormType('EXPENSE');
     setFormError(null);
+    setVoiceSuccessMsg(null);
     const firstCat = categories.find((c) => c.type === 'EXPENSE');
     setFormCategoryId(firstCat ? firstCat.id : '');
     setFormPaymentMethod('Transfer Bank');
@@ -134,12 +140,41 @@ export const TransactionsPage: React.FC = () => {
     setFormAmount(tx.amount.toString());
     setFormType(tx.type);
     setFormError(null);
+    setVoiceSuccessMsg(null);
     setFormCategoryId(tx.categoryId);
     setFormPaymentMethod(tx.paymentMethod);
     setFormMerchant(tx.merchant || '');
     setFormDate(tx.transactionDate ? tx.transactionDate.split('T')[0] : '');
     setFormNotes(tx.description || '');
     setIsFormOpen(true);
+  };
+
+  const handleVoiceTransactionParsed = (parsed: ParsedVoiceTransaction) => {
+    if (parsed.type) setFormType(parsed.type);
+    if (parsed.amount) setFormAmount(parsed.amount.toString());
+    if (parsed.title) setFormTitle(parsed.title);
+    if (parsed.paymentMethod) setFormPaymentMethod(parsed.paymentMethod);
+    if (parsed.merchant) setFormMerchant(parsed.merchant);
+    if (parsed.date) setFormDate(parsed.date);
+    if (parsed.notes) setFormNotes(parsed.notes);
+
+    // Auto-select category
+    if (parsed.categoryName && categories.length > 0) {
+      const matched = categories.find(
+        (c) =>
+          c.type === parsed.type &&
+          c.name.toLowerCase().includes(parsed.categoryName!.toLowerCase())
+      );
+      if (matched) {
+        setFormCategoryId(matched.id);
+      }
+    }
+
+    setVoiceSuccessMsg(
+      `Terdeteksi: ${parsed.type === 'EXPENSE' ? 'Pengeluaran' : 'Pemasukan'} ${
+        parsed.amount ? 'Rp ' + parsed.amount.toLocaleString('id-ID') : ''
+      } (${parsed.title})`
+    );
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -219,6 +254,17 @@ export const TransactionsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <button
+            onClick={() => {
+              openCreateModal();
+              setIsVoiceOpen(true);
+            }}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-brand-violet dark:text-brand-cyan border border-slate-200 dark:border-brand-violet/30 shadow-sm transition-all flex items-center gap-1.5 group"
+          >
+            <Mic className="w-4 h-4 text-brand-violet dark:text-brand-cyan group-hover:scale-110 transition-transform" />
+            <span>Voice Note AI</span>
+          </button>
+
           <button
             onClick={() => setIsScanOpen(true)}
             className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-brand-violet dark:text-brand-cyan border border-slate-200 dark:border-brand-violet/30 shadow-sm transition-all flex items-center gap-1.5"
@@ -456,6 +502,36 @@ export const TransactionsPage: React.FC = () => {
                 Catat mutasi keuangan pemasukan atau pengeluaran secara akurat.
               </p>
 
+              {/* Voice Note AI Quick Fill Button */}
+              <button
+                type="button"
+                onClick={() => setIsVoiceOpen(true)}
+                className="w-full py-2.5 px-3.5 mb-3 rounded-2xl bg-gradient-to-r from-brand-violet/15 via-purple-500/10 to-brand-teal/15 hover:from-brand-violet/25 hover:to-brand-teal/25 border border-brand-violet/40 text-brand-violet dark:text-brand-cyan font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all group shrink-0 active:scale-[0.99]"
+              >
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-violet to-brand-teal flex items-center justify-center text-white shadow-sm group-hover:scale-110 transition-transform">
+                  <Mic className="w-3.5 h-3.5" />
+                </div>
+                <span>Bicara / Rekam Suara (Voice Note AI)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-violet/20 text-brand-violet dark:text-brand-cyan ml-auto font-mono">
+                  Auto-Fill ✨
+                </span>
+              </button>
+
+              {/* Voice Detection Success Banner */}
+              {voiceSuccessMsg && (
+                <div className="p-2.5 mb-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2 animate-fadeIn shrink-0">
+                  <Sparkles className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span className="flex-1 font-semibold">{voiceSuccessMsg}</span>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceSuccessMsg(null)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* In-Modal Error Notification */}
               {formError && (
                 <div className="p-3 mb-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-start gap-2 animate-fadeIn shrink-0">
@@ -660,6 +736,14 @@ export const TransactionsPage: React.FC = () => {
         isOpen={isScanOpen}
         onClose={() => setIsScanOpen(false)}
         onSuccess={fetchTransactions}
+      />
+
+      {/* Voice Note AI Modal */}
+      <VoiceNoteModal
+        isOpen={isVoiceOpen}
+        onClose={() => setIsVoiceOpen(false)}
+        onParsedTransaction={handleVoiceTransactionParsed}
+        availableCategories={categories}
       />
     </div>
   );

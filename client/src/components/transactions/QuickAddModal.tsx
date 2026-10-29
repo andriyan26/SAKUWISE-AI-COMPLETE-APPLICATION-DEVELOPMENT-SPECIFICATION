@@ -2,7 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../lib/api-client.js';
 import { sound } from '../../lib/sound.js';
-import { X, ArrowDownRight, ArrowUpRight, Calendar, DollarSign, Tag, CreditCard } from 'lucide-react';
+import { VoiceNoteModal } from '../common/VoiceNoteModal.js';
+import { ParsedVoiceTransaction } from '../../lib/voice-parser.js';
+import {
+  X,
+  ArrowDownRight,
+  ArrowUpRight,
+  Calendar,
+  DollarSign,
+  Tag,
+  CreditCard,
+  Mic,
+  Sparkles,
+} from 'lucide-react';
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -21,6 +33,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [voiceSuccessMsg, setVoiceSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -77,6 +91,33 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
     }
   };
 
+  const handleVoiceParsed = (parsed: ParsedVoiceTransaction) => {
+    if (parsed.type) setType(parsed.type);
+    if (parsed.amount) setAmount(parsed.amount.toString());
+    if (parsed.title) setTitle(parsed.title);
+    if (parsed.paymentMethod) setPaymentMethod(parsed.paymentMethod);
+    if (parsed.merchant) setMerchant(parsed.merchant);
+    if (parsed.date) setDate(parsed.date);
+
+    // Auto-select category
+    if (parsed.categoryName && categories.length > 0) {
+      const matched = categories.find(
+        (c) =>
+          c.type === parsed.type &&
+          c.name.toLowerCase().includes(parsed.categoryName!.toLowerCase())
+      );
+      if (matched) {
+        setCategoryId(matched.id);
+      }
+    }
+
+    setVoiceSuccessMsg(
+      `Terdeteksi: ${parsed.type === 'EXPENSE' ? 'Pengeluaran' : 'Pemasukan'} ${
+        parsed.amount ? 'Rp ' + parsed.amount.toLocaleString('id-ID') : ''
+      } (${parsed.title})`
+    );
+  };
+
   const filteredCategories = categories.filter((c) => c.type === type);
 
   return createPortal(
@@ -89,7 +130,37 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
           <X className="w-5 h-5" />
         </button>
 
-        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 shrink-0">Tambah Transaksi Baru</h3>
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 shrink-0">Tambah Transaksi Baru</h3>
+
+        {/* Voice Note AI Quick Fill Button */}
+        <button
+          type="button"
+          onClick={() => setIsVoiceOpen(true)}
+          className="w-full py-2.5 px-3.5 mb-3 rounded-2xl bg-gradient-to-r from-brand-violet/15 via-purple-500/10 to-brand-teal/15 hover:from-brand-violet/25 hover:to-brand-teal/25 border border-brand-violet/40 text-brand-violet dark:text-brand-cyan font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all group shrink-0 active:scale-[0.99]"
+        >
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-violet to-brand-teal flex items-center justify-center text-white shadow-sm group-hover:scale-110 transition-transform">
+            <Mic className="w-3.5 h-3.5" />
+          </div>
+          <span>Bicara / Rekam Suara (Voice Note AI)</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-violet/20 text-brand-violet dark:text-brand-cyan ml-auto font-mono">
+            Auto-Fill ✨
+          </span>
+        </button>
+
+        {/* Voice Detection Success Banner */}
+        {voiceSuccessMsg && (
+          <div className="p-2.5 mb-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2 animate-fadeIn shrink-0">
+            <Sparkles className="w-4 h-4 shrink-0 text-emerald-500" />
+            <span className="flex-1 font-semibold">{voiceSuccessMsg}</span>
+            <button
+              type="button"
+              onClick={() => setVoiceSuccessMsg(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Type Switcher */}
         <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-5">
@@ -229,6 +300,14 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose, o
           </div>
         </form>
       </div>
+
+      {/* Voice Note AI Modal */}
+      <VoiceNoteModal
+        isOpen={isVoiceOpen}
+        onClose={() => setIsVoiceOpen(false)}
+        onParsedTransaction={handleVoiceParsed}
+        availableCategories={categories}
+      />
     </div>,
     document.body
   );

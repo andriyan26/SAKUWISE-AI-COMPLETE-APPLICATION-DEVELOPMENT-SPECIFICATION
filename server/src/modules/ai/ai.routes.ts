@@ -12,6 +12,7 @@ import {
   deleteAIMemory,
   submitAIFeedback,
 } from './ai.controller.js';
+import { synthesizeSpeech } from './tts.controller.js';
 
 const router = Router();
 
@@ -28,6 +29,10 @@ const confirmActionSchema = z.object({
     payload: z.any(),
   }),
 });
+
+// Public Neural Indonesian TTS endpoints (also accessible on Login & Register)
+router.get('/tts', synthesizeSpeech);
+router.post('/tts', synthesizeSpeech);
 
 router.use(authenticate);
 

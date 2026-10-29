@@ -18,6 +18,7 @@ import receiptsRoutes from './modules/receipts/receipts.routes.js';
 import reportsRoutes from './modules/reports/reports.routes.js';
 import notificationsRoutes from './modules/notifications/notifications.routes.js';
 import settingsRoutes from './modules/settings/settings.routes.js';
+import { synthesizeSpeech } from './modules/ai/tts.controller.js';
 
 export const createApp = (): express.Application => {
   const app = express();
@@ -59,6 +60,8 @@ export const createApp = (): express.Application => {
 
   // API v1 routes
   const apiV1 = express.Router();
+  apiV1.get('/tts', synthesizeSpeech);
+  apiV1.post('/tts', synthesizeSpeech);
   apiV1.use('/auth', authRoutes);
   apiV1.use('/dashboard', dashboardRoutes);
   apiV1.use('/transactions', transactionsRoutes);

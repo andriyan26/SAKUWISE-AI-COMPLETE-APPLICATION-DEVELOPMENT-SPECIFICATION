@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { api } from '../../lib/api-client.js';
 import { sound } from '../../lib/sound.js';
+import { voiceService } from '../../lib/voice-service.js';
 import { getSafeAvatarUrl, handleAvatarError } from '../../lib/avatar.js';
 import {
   Bot,
@@ -28,6 +29,10 @@ import {
   PieChart,
   ChevronRight,
   Info,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface FormattedMessageProps {
@@ -127,6 +132,8 @@ export const AIAssistantPage: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState<{ [key: string]: boolean }>({});
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -146,6 +153,14 @@ export const AIAssistantPage: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  // Clean up any active speech or microphone listening when leaving the page
+  useEffect(() => {
+    return () => {
+      sound.stopSpeaking();
+      voiceService.stopListening();
+    };
+  }, []);
 
   // Featured suggestion prompt cards
   const suggestionCards = [
@@ -351,6 +366,63 @@ export const AIAssistantPage: React.FC = () => {
       fetchMemories();
       setToast({ type: 'success', message: 'Memori AI berhasil dihapus.' });
     } catch (_) {}
+  };
+
+  const toggleVoiceInput = () => {
+    if (isVoiceListening) {
+      voiceService.stopListening();
+      setIsVoiceListening(false);
+      sound.playChirp(400, 0.08);
+      return;
+    }
+
+    // Stop any AI message currently being spoken so it doesn't bleed into the mic
+    sound.stopSpeaking();
+    setSpeakingMsgId(null);
+
+    sound.playChirp(750, 0.08);
+    const started = voiceService.startListening({
+      lang: 'id-ID',
+      continuous: true,
+      interimResults: true,
+      onStart: () => setIsVoiceListening(true),
+      onResult: (text) => {
+        setInputValue(text);
+      },
+      onError: (err) => {
+        setIsVoiceListening(false);
+        setToast({ type: 'error', message: err });
+      },
+      onEnd: () => setIsVoiceListening(false),
+    });
+
+    if (!started) {
+      setIsVoiceListening(false);
+    }
+  };
+
+  const handleSpeakMessage = (content: string, id: string) => {
+    if (speakingMsgId === id) {
+      sound.stopSpeaking();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    // Stop microphone if user was recording while clicking speak
+    if (isVoiceListening) {
+      voiceService.stopListening();
+      setIsVoiceListening(false);
+    }
+
+    setSpeakingMsgId(id);
+    sound.speak(content, {
+      onEnd: () => {
+        setSpeakingMsgId((prev) => (prev === id ? null : prev));
+      },
+      onError: () => {
+        setSpeakingMsgId((prev) => (prev === id ? null : prev));
+      },
+    });
   };
 
   return (
@@ -646,6 +718,26 @@ export const AIAssistantPage: React.FC = () => {
                     {!isUser && (
                       <div className="flex items-center gap-3 text-[11px] text-slate-400 pl-1 pt-0.5">
                         <button
+                          onClick={() => handleSpeakMessage(msg.content, msg.id)}
+                          title={speakingMsgId === msg.id ? 'Hentikan Suara' : 'Dengarkan Jawaban AI'}
+                          className={`hover:text-brand-violet dark:hover:text-brand-cyan flex items-center gap-1 transition-colors ${
+                            speakingMsgId === msg.id ? 'text-brand-violet dark:text-brand-cyan font-bold' : ''
+                          }`}
+                        >
+                          {speakingMsgId === msg.id ? (
+                            <>
+                              <VolumeX className="w-3 h-3 text-rose-500 animate-pulse" />
+                              <span className="text-rose-500">Berhenti</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="w-3 h-3" />
+                              <span>Dengarkan</span>
+                            </>
+                          )}
+                        </button>
+                        <span>•</span>
+                        <button
                           onClick={() => handleCopy(msg.content, msg.id)}
                           className="hover:text-slate-700 dark:hover:text-white flex items-center gap-1 transition-colors"
                         >
@@ -743,6 +835,10 @@ export const AIAssistantPage: React.FC = () => {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (isVoiceListening) {
+                voiceService.stopListening();
+                setIsVoiceListening(false);
+              }
               handleSendMessage();
             }}
             className="flex items-center gap-2"
@@ -753,10 +849,39 @@ export const AIAssistantPage: React.FC = () => {
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Tanyakan analisis keuangan, evaluasi pos belanja, atau rekomendasi anggaran..."
-                className="w-full px-4 py-3 sm:py-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:border-brand-violet focus:ring-1 focus:ring-brand-violet shadow-inner transition-all"
+                placeholder={
+                  isVoiceListening
+                    ? 'Sedang mendengarkan... Silakan bicara sekarang...'
+                    : 'Tanyakan analisis keuangan, evaluasi pos belanja, atau rekomendasi anggaran...'
+                }
+                className={`w-full pl-4 pr-10 sm:pr-24 py-3 sm:py-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border text-slate-900 dark:text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none shadow-inner transition-all ${
+                  isVoiceListening
+                    ? 'border-rose-500 ring-2 ring-rose-500/30'
+                    : 'border-slate-200 dark:border-slate-700 focus:border-brand-violet focus:ring-1 focus:ring-brand-violet'
+                }`}
               />
+              {isVoiceListening && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-[11px] font-bold text-rose-500 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-full border border-rose-200 dark:border-rose-800">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                  <span className="hidden sm:inline">Mendengarkan...</span>
+                </span>
+              )}
             </div>
+
+            {/* Voice Note Input Button */}
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              title={isVoiceListening ? 'Hentikan Rekam Suara' : 'Bicara dengan AI (Voice Note)'}
+              className={`p-3 sm:p-3.5 rounded-2xl transition-all shadow-md flex items-center justify-center shrink-0 ${
+                isVoiceListening
+                  ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/40 animate-pulse ring-4 ring-rose-500/30'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-brand-violet dark:text-brand-cyan hover:scale-105 active:scale-95 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {isVoiceListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+
             <button
               type="submit"
               disabled={!inputValue.trim() || isThinking}

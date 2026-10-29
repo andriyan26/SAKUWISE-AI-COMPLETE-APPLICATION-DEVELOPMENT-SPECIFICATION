@@ -40,16 +40,27 @@ export const RegisterPage: React.FC = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
+    // Preload common registration voice prompts into memory cache
+    sound.preloadPhrases([
+      'Halo teman baru! Yuk daftar dan mulai perjalanan finansialmu bareng aku.',
+      'Boleh tahu siapa nama lengkapmu?',
+      'Ketik email aktifmu ya, biar akunmu tetap aman.',
+      'Tenang, aku tutup mata, nggak bakal ngintip kok.',
+      'Wah, kata sandinya terlihat.',
+      'Pastikan kata sandinya sama persis ya.',
+      'Mendaftarkan akun barumu, tunggu sebentar ya.',
+    ]);
+
     // Initial welcome voice & speech
     setMascotState('greeting');
-    setSpeechText('Halo teman baru! Ayo daftar bareng aku! 👋✨');
+    setSpeechText('Halo teman baru! Yuk daftar bareng aku! 👋✨');
     sound.playCartoonGreeting();
-    sound.speak('Halo teman baru! Ayo daftar dan mulai masa depan finansialmu bareng aku!');
+    sound.speak('Halo teman baru! Yuk daftar dan mulai perjalanan finansialmu bareng aku.');
 
     const t = setTimeout(() => {
       setMascotState('idle');
       setSpeechText('');
-    }, 4500);
+    }, 4800);
 
     const handleFirstGesture = () => {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -63,6 +74,7 @@ export const RegisterPage: React.FC = () => {
 
     return () => {
       clearTimeout(t);
+      sound.stopSpeaking();
       window.removeEventListener('click', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
     };

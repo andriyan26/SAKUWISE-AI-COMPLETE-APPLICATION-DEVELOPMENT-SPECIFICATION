@@ -62,16 +62,24 @@ export const AppIntroPreloader: React.FC<AppIntroPreloaderProps> = ({
   }, [durationMs, onComplete]);
 
   const handleSkip = () => {
+    if (isFinishing) return;
+    sound.unlockAudio();
     setIsFinishing(true);
     sound.playCartoonPop();
     setTimeout(() => {
       onComplete();
-    }, 250);
+    }, 200);
   };
 
   return (
     <div
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-between p-6 bg-[#060913] text-white overflow-hidden transition-all duration-500 select-none ${
+      onClick={() => {
+        sound.unlockAudio();
+        if (progress >= 90) {
+          handleSkip();
+        }
+      }}
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-between p-6 bg-[#060913] text-white overflow-hidden transition-all duration-500 select-none cursor-pointer ${
         isFinishing ? 'opacity-0 scale-105 pointer-events-none blur-sm' : 'opacity-100 scale-100'
       }`}
       style={{

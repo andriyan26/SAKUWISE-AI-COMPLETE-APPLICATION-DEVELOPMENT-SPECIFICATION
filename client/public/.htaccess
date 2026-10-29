@@ -9,6 +9,7 @@
   AddType application/json .json
   AddType font/woff2 .woff2
   AddType font/woff .woff
+  AddType audio/mpeg .mp3
 </IfModule>
 
 <IfModule mod_rewrite.c>
@@ -20,9 +21,9 @@
   RewriteRule ^api/(.*)$ api/v1/index.php [QSA,L]
 
   # 2. Never rewrite missing static assets to index.html (return 404 directly)
-  # This prevents Hostinger CDN from caching index.html for .js/.css requests
-  RewriteCond %{REQUEST_URI} \.(js|mjs|css|svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|map|json)$ [NC,OR]
-  RewriteCond %{REQUEST_URI} ^/assets/ [NC]
+  # This prevents Hostinger CDN from caching index.html for .js/.css/.mp3 requests
+  RewriteCond %{REQUEST_URI} \.(js|mjs|css|svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|map|json|mp3)$ [NC,OR]
+  RewriteCond %{REQUEST_URI} ^/(assets|voices)/ [NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteRule ^ - [R=404,L]
 

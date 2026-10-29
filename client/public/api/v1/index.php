@@ -22,6 +22,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
+// Fast-path Neural TTS Audio Stream (/api/v1/tts or /api/v1/ai/tts)
+$early_uri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+$early_path = trim(preg_replace('#^.*?/api(/v1)?#', '', $early_uri), '/');
+if ($early_path === 'tts' || $early_path === 'ai/tts') {
+    $raw_input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $tts_text = trim($_GET['text'] ?? $raw_input['text'] ?? '');
+    $tts_lang = substr(trim($_GET['lang'] ?? $raw_input['lang'] ?? 'id'), 0, 5) ?: 'id';
+    if ($tts_text === '') {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Parameter text diperlukan."]);
+        exit;
+    }
+    $tts_text = mb_substr($tts_text, 0, 1500, 'UTF-8');
+    // Split into natural chunks <= 180 chars
+    $words = preg_split('/\s+/u', $tts_text, -1, PREG_SPLIT_NO_EMPTY);
+    $chunks = [];
+    $curr = '';
+    foreach ($words as $w) {
+        if (mb_strlen($curr . ' ' . $w, 'UTF-8') <= 180) {
+            $curr = trim($curr . ' ' . $w);
+        } else {
+            if ($curr !== '') $chunks[] = $curr;
+            $curr = $w;
+        }
+    }
+    if ($curr !== '') $chunks[] = $curr;
+
+    $audio_data = '';
+    foreach ($chunks as $chunk) {
+        $chunk_bytes = false;
+
+        // 1. Primary Engine: Studio Human Neural Indonesian Voice (id_001)
+        if (function_exists('curl_init')) {
+            $payload = json_encode(['text' => $chunk, 'voice' => 'id_001']);
+            $ch_neural = curl_init('https://ottsy.weilbyte.dev/api/generation');
+            curl_setopt_array($ch_neural, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $payload,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_TIMEOUT => 8,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                ],
+                CURLOPT_SSL_VERIFYPEER => false,
+            ]);
+            $res_neural = curl_exec($ch_neural);
+            $code_neural = curl_getinfo($ch_neural, CURLINFO_HTTP_CODE);
+            curl_close($ch_neural);
+            if ($code_neural === 200 && $res_neural) {
+                $decoded_json = json_decode($res_neural, true);
+                if (!empty($decoded_json['data'])) {
+                    $decoded_mp3 = base64_decode($decoded_json['data']);
+                    if ($decoded_mp3 && strlen($decoded_mp3) > 200) {
+                        $chunk_bytes = $decoded_mp3;
+                    }
+                }
+            }
+        }
+
+        // 2. Secondary Fallback Stream
+        if (!$chunk_bytes) {
+            $q = rawurlencode($chunk);
+            $url = "https://translate.googleapis.com/translate_tts?ie=UTF-8&q={$q}&tl={$tts_lang}&client=gtx&ttsspeed=1";
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_TIMEOUT => 6,
+                    CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                    CURLOPT_HTTPHEADER => ['Referer: https://translate.google.com/'],
+                    CURLOPT_SSL_VERIFYPEER => false,
+                ]);
+                $chunk_bytes = curl_exec($ch);
+                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($http_code !== 200) $chunk_bytes = false;
+            }
+            if (!$chunk_bytes) {
+                $ctx = stream_context_create([
+                    'http' => [
+                        'method' => 'GET',
+                        'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: https://translate.google.com/\r\n",
+                        'timeout' => 6,
+                    ],
+                    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+                ]);
+                $chunk_bytes = @file_get_contents($url, false, $ctx);
+            }
+        }
+
+        if ($chunk_bytes && strlen($chunk_bytes) > 100) {
+            $audio_data .= $chunk_bytes;
+        }
+    }
+
+    if (strlen($audio_data) > 100) {
+        header("Content-Type: audio/mpeg");
+        header("Content-Length: " . strlen($audio_data));
+        header("Cache-Control: public, max-age=86400");
+        header("Accept-Ranges: bytes");
+        echo $audio_data;
+        exit;
+    } else {
+        http_response_code(503);
+        echo json_encode(["success" => false, "message" => "Fallback ke mesin suara lokal."]);
+        exit;
+    }
+}
+
 // 2. Database Configuration
 // Prioritas kredensial Hostinger yang telah dibuat pengguna
 $is_local = (isset($_SERVER['SERVER_NAME']) && in_array($_SERVER['SERVER_NAME'], ['localhost', '127.0.0.1']));
